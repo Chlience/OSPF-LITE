@@ -5,24 +5,28 @@
 #include <stddef.h>
 #include <cstring>
 
+#include "ospf_interface.h"
+
 struct GlobalConfig {
     const char* nic_name;
-    uint32_t router_id;
+    uint32_t    ip;
+    uint32_t    network_mask;
+    
+    uint32_t    router_id;
+	uint32_t	hello_interval = 10;
+	uint32_t	dead_interval = 40;
+	uint32_t	wait_interval = 40;
+
+    OSPFArea*   area;
 
     // Constructor
-    GlobalConfig(const char* name, uint32_t id) {
-        // Allocate memory and copy the nic_name
-        nic_name = new char[strlen(name) + 1];
-        strcpy(const_cast<char*>(nic_name), name);
-        
-        // Assign router_id
-        router_id = id;
+    GlobalConfig() {
     }
 
-    // Destructor to free allocated memory
-    ~GlobalConfig() {
-        delete[] nic_name;
-    }
+    ~GlobalConfig() {}
 };
+
+uint32_t get_ip_address(const char*);
+uint32_t get_network_mask(const char*);
 
 #endif

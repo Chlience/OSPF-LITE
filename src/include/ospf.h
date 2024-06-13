@@ -27,5 +27,6 @@ struct OSPFHello {
 
 int ospf_init();
 void send_ospf_packet(uint32_t dst_ip, const uint8_t ospf_type, const char* ospf_data, const size_t ospf_data_len);
+void* send_ospf_hello_package_thread(void* interface);
 
 #endif
