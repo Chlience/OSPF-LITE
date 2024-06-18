@@ -25,8 +25,17 @@ struct OSPFHello {
     uint32_t    backup_designated_router;
 };  // 20 bytes
 
+enum OSPFType: uint8_t {
+    T_HELLO = 1,
+    T_DD,
+    T_LSR,
+    T_LSU,
+    T_LSAck
+};
+
 int ospf_init();
 void send_ospf_packet(uint32_t dst_ip, const uint8_t ospf_type, const char* ospf_data, const size_t ospf_data_len);
 void* send_ospf_hello_package_thread(void* interface);
+void* recv_ospf_package_thread(void* interface);
 
 #endif

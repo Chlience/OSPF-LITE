@@ -3,6 +3,7 @@
 
 #include <list>
 #include <stdint.h>
+#include <set>
 
 #include "neighbor.h"
 
@@ -12,7 +13,11 @@ class Interface {
 	uint32_t			network_mask;
 	uint32_t			dr;
 	uint32_t			bdr;
-	std::list<Neighbor*> neighbors;
+	// std::list<Neighbor*> neighbors;
+	std::set<Neighbor> neighbors;
+	
+	std::set<Neighbor>::iterator find_neighbor(in_addr_t);
+	void add_neighbor(Neighbor);
 };
 
 #endif

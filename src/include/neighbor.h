@@ -2,6 +2,7 @@
 #define NEIGHBOR_H
 
 #include <stdint.h>
+#include <netinet/ip.h>
 
 enum struct NeighborState : uint8_t {
     S_DOWN = 0,
@@ -69,11 +70,11 @@ enum struct NeighborEvent : uint8_t {
 
 class Neighbor {
 	public:
-	NeighborState	state = NeighborState::S_DOWN;
+	NeighborState	state;
 	bool			is_master;
 	uint32_t		dd_seq_num;
 	uint32_t		last_recv_dd_seq_num;
-	uint32_t		id;		// router_id
+	uint32_t		id;
 	uint32_t		pri;
 	uint32_t		ip;
 	uint32_t		opts;
@@ -82,6 +83,25 @@ class Neighbor {
 	uint32_t		link_state_retrans_list;
 	uint32_t		database_summary_list;
 	uint32_t		link_state_request_list;
+
+	bool operator < (const Neighbor& other) const {
+        return ip < other.ip;
+    }
+
+	Neighbor(uint32_t ip):ip(ip) {
+		state = NeighborState::S_DOWN;
+		is_master	= false;
+		dd_seq_num	= 0;
+		last_recv_dd_seq_num	= 0;
+		id		= 0;
+		pri		= 0;
+		opts	= 0;
+		dr		= 0;
+		bdr		= 0;
+		link_state_retrans_list	= 0;
+		database_summary_list	= 0;
+		link_state_request_list	= 0;
+	}
 };
 
 #endif

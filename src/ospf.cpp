@@ -15,6 +15,7 @@
 #include "ospf.h"
 #include "config.h"
 #include "interface.h"
+#include "debug.h"
 
 extern GlobalConfig myconfigs;
 
@@ -123,12 +124,12 @@ void send_ospf_packet(uint32_t dst_ip,
 	free(ospf_packet);
 }
 
-void* send_ospf_hello_package_thread(void* inf) {
-	Interface *interface = (Interface*)inf;
+void* send_ospf_hello_package_thread(void* inter) {
+	Interface *interface = (Interface*)inter;
 
 	int socket_fd;
     if ((socket_fd = socket(AF_INET, SOCK_RAW, proto_ospf->p_proto)) < 0) {
-        perror("SendPacket: socket_fd init");
+        perror("SendHelloPacket: socket_fd init");
     }
 
 	/* 将 socket 绑定到特定到网卡，所有的包都将通过该网卡进行发送 */
@@ -138,7 +139,7 @@ void* send_ospf_hello_package_thread(void* inf) {
 	memset(&ifr, 0, sizeof(ifr));
 	strcpy(ifr.ifr_name, myconfigs.nic_name);
     if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) < 0) {
-        perror("SendPacket: setsockopt");
+        perror("SendHelloPacket: setsockopt");
     }
 
 	/* 将目的地址设为 AllSPFRouters 224.0.0.5 */
@@ -176,9 +177,10 @@ void* send_ospf_hello_package_thread(void* inf) {
         ospf_hello->designated_router			= htonl(interface->dr);
         ospf_hello->backup_designated_router	= htonl(interface->bdr);
 
+		/* 填写 Neighbors 的 router id */
 		uint32_t* ospf_hello_neighbor = (uint32_t*)(ospf_packet + sizeof(OSPFHeader) + sizeof(OSPFHello));
-        for (auto& nbr: interface->neighbors) {
-            *ospf_hello_neighbor++ = htonl(nbr->id);
+        for (auto nbr: interface->neighbors) {
+            *ospf_hello_neighbor++ = htonl(nbr.id);
         }
 
 		/* 计算校验和 */
@@ -186,11 +188,107 @@ void* send_ospf_hello_package_thread(void* inf) {
 
 		/* Send Packet */
 		if (sendto(socket_fd, ospf_packet, ospf_len, 0, (struct sockaddr*)&dst_sockaddr, sizeof(dst_sockaddr)) < 0) {
-			perror("[Thread]\tSendHelloPacket: sendto");
+			perror("SendHelloPacket: sendto");
 		}
 		else {
-			printf("[Thread]\tSendHelloPacket: send success\n");
+			printf("SendHelloPacket: send success\n");
 		}
         sleep(myconfigs.hello_interval);
+	}
+}
+
+char* n_ip2string(in_addr_t ip) {
+    struct in_addr ip_addr;
+    ip_addr.s_addr = ip;
+    return inet_ntoa(ip_addr);
+	// char *inet_ntoa(struct in_addr in);					将网络字节序地址(in_addr) 转换为点分十进制字符串
+	// int inet_aton(const char *IP, struct in_addr *addr); 将点分十进制字符串转化为网络字节序地址，并返回对应的整数
+}
+
+char* ip2string(uint32_t ip) {
+    struct in_addr ip_addr;
+    ip_addr.s_addr = htonl(ip);
+    return inet_ntoa(ip_addr);
+	// char *inet_ntoa(struct in_addr in);					将网络字节序地址(in_addr) 转换为点分十进制字符串
+	// int inet_aton(const char *IP, struct in_addr *addr); 将点分十进制字符串转化为网络字节序地址，并返回对应的整数
+}
+
+void* recv_ospf_package_thread(void *inter) {
+	Interface *interface = (Interface*)inter;
+
+	/* socket(AF_INET, SOCK_RAW, proto_ospf->p_proto) 无法正确接收包 */
+	int socket_fd;
+	if ((socket_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IP))) < 0) {
+        perror("[Thread]RecvPacket: socket_fd init");
+    }
+    // if ((socket_fd = socket(AF_INET, SOCK_RAW, proto_ospf->p_proto)) < 0) {
+    //     perror("SendHelloPacket: socket_fd init");
+    // }
+
+	struct ifreq ifr;
+	memset(&ifr, 0, sizeof(ifr));
+	strcpy(ifr.ifr_name, myconfigs.nic_name);
+    if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) < 0) {
+        perror("RecvPacket: setsockopt");
+    }
+
+	char* frame = (char*)malloc(1514);
+	char* packet;
+    struct iphdr *ip_header;
+    struct in_addr src, dst;
+	while (true) {
+		memset(frame, 0, 1514);
+		size_t recv_size = recv(socket_fd, frame, 1514, 0);
+
+		packet = frame + sizeof(struct ethhdr);
+		ip_header = (struct iphdr*)packet;
+
+		/* 检查是否是 OSPF 包 */
+		if (ip_header->protocol == proto_ospf->p_proto) {
+			debugf("RecvPacket: OSPF packet, size %lu\n", recv_size);
+		}
+		else {
+			// debugf("RecvPacket: Not OSPF packet\n");
+			continue;
+		}
+
+		/* 检查发送的对象是否是本机 or 广播地址 */
+
+		src.s_addr = ip_header->saddr;
+		dst.s_addr = ip_header->daddr;
+
+		if (dst.s_addr != htonl(interface->ip) && dst.s_addr != inet_addr("224.0.0.5")) {
+			debugf("RecvPacket: Not for me\n");
+			continue;
+		} else {
+			debugf("RecvPacket: From %s\n", inet_ntoa(src));
+			debugf("RecvPacket: TO   %s\n", inet_ntoa(dst));
+		}
+
+		/* 解析 OSPF 包 */
+		OSPFHeader* ospf_header = (OSPFHeader*)(packet + sizeof(struct iphdr));
+
+		/* 处理 Hello 包 */
+		if (ospf_header->type == T_HELLO) {
+			debugf("RecvPacket: Hello\n");
+			OSPFHello* ospf_hello = (OSPFHello*)(packet + sizeof(struct iphdr) + sizeof(OSPFHeader));
+
+			// 将 src 加入到邻居中
+
+			uint32_t src_ip = ntohl(src.s_addr);
+			uint32_t dst_ip = ntohl(dst.s_addr);
+
+			auto iter = interface->find_neighbor(src_ip);
+			if (iter == interface->neighbors.end()) {
+				Neighbor* neighbor = new Neighbor(src_ip);
+				neighbor->id	= ntohl(ospf_header->router_id);
+				neighbor->dr	= ntohl(ospf_hello->designated_router);
+				neighbor->bdr	= ntohl(ospf_hello->backup_designated_router);
+				neighbor->pri	= ntohl(ospf_hello->rtr_pri);
+				interface->add_neighbor(*neighbor);
+				debugf("RecvPacket: Add %s into neighbors\n", ip2string(neighbor->id));
+				iter = interface->find_neighbor(src_ip);
+			}
+		}
 	}
 }
