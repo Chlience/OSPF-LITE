@@ -34,6 +34,8 @@ int main() {
 	Interface interface;
 	interface.ip			= myconfigs.ip;
 	interface.network_mask	= myconfigs.network_mask;
+
+	interface.event_interface_up();
 	
     pthread_t hello_sender_thread;
     pthread_t reciver_thread;

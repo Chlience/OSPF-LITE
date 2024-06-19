@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <netinet/ip.h>
 
-enum struct NeighborState : uint8_t {
+enum struct NeighborState:uint8_t {
     S_DOWN = 0,
     S_ATTEMPT,
     S_INIT,
@@ -15,7 +15,7 @@ enum struct NeighborState : uint8_t {
     S_FULL,
 };
 
-enum struct NeighborEvent : uint8_t {
+enum struct NeighborEvent:uint8_t {
     E_HELLORECV = 0,	/* 从邻居接收到一个 Hello 包 */
     E_START,			/**
 						 * 表示将以 HelloInterval 秒的间隔向邻居发送 Hello 包。
@@ -68,6 +68,8 @@ enum struct NeighborEvent : uint8_t {
 						 */
 };
 
+class Interface;
+
 class Neighbor {
 	public:
 	NeighborState	state;
@@ -83,9 +85,10 @@ class Neighbor {
 	uint32_t		link_state_retrans_list;
 	uint32_t		database_summary_list;
 	uint32_t		link_state_request_list;
+	Interface*		interface;
 
 	bool operator < (const Neighbor& other) const {
-        return ip < other.ip;
+        return ip < other.ip; // 考虑要不要用 id 作为键
     }
 
 	Neighbor(uint32_t ip):ip(ip) {
@@ -101,7 +104,15 @@ class Neighbor {
 		link_state_retrans_list	= 0;
 		database_summary_list	= 0;
 		link_state_request_list	= 0;
+		interface	= nullptr;
 	}
+
+	void event_hello_received();
+	void event_start(); // 仅在 NBMA 网络上的邻居相关
+	void event_2way_received();
+	void event_1way_received();
+	void event_negotiation_done();
+	void event_exchange_done();
 };
 
 #endif

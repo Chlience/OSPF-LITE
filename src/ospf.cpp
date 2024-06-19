@@ -180,7 +180,7 @@ void* send_ospf_hello_package_thread(void* inter) {
 		/* 填写 Neighbors 的 router id */
 		uint32_t* ospf_hello_neighbor = (uint32_t*)(ospf_packet + sizeof(OSPFHeader) + sizeof(OSPFHello));
         for (auto nbr: interface->neighbors) {
-            *ospf_hello_neighbor++ = htonl(nbr.id);
+            *ospf_hello_neighbor++ = htonl(nbr->id);
         }
 
 		/* 计算校验和 */
@@ -195,22 +195,6 @@ void* send_ospf_hello_package_thread(void* inter) {
 		}
         sleep(myconfigs.hello_interval);
 	}
-}
-
-char* n_ip2string(in_addr_t ip) {
-    struct in_addr ip_addr;
-    ip_addr.s_addr = ip;
-    return inet_ntoa(ip_addr);
-	// char *inet_ntoa(struct in_addr in);					将网络字节序地址(in_addr) 转换为点分十进制字符串
-	// int inet_aton(const char *IP, struct in_addr *addr); 将点分十进制字符串转化为网络字节序地址，并返回对应的整数
-}
-
-char* ip2string(uint32_t ip) {
-    struct in_addr ip_addr;
-    ip_addr.s_addr = htonl(ip);
-    return inet_ntoa(ip_addr);
-	// char *inet_ntoa(struct in_addr in);					将网络字节序地址(in_addr) 转换为点分十进制字符串
-	// int inet_aton(const char *IP, struct in_addr *addr); 将点分十进制字符串转化为网络字节序地址，并返回对应的整数
 }
 
 void* recv_ospf_package_thread(void *inter) {
@@ -267,28 +251,79 @@ void* recv_ospf_package_thread(void *inter) {
 
 		/* 解析 OSPF 包 */
 		OSPFHeader* ospf_header = (OSPFHeader*)(packet + sizeof(struct iphdr));
-
+		
+		printf("RecvPacket: RID %s", n_ip2string(ospf_header->router_id));
 		/* 处理 Hello 包 */
 		if (ospf_header->type == T_HELLO) {
-			debugf("RecvPacket: Hello\n");
+			debugf(" Hello packet\n");
 			OSPFHello* ospf_hello = (OSPFHello*)(packet + sizeof(struct iphdr) + sizeof(OSPFHeader));
 
 			// 将 src 加入到邻居中
 
 			uint32_t src_ip = ntohl(src.s_addr);
 			uint32_t dst_ip = ntohl(dst.s_addr);
+			uint32_t pre_pri, pre_dr, pre_bdr;
+			bool new2way = false;
 
-			auto iter = interface->find_neighbor(src_ip);
-			if (iter == interface->neighbors.end()) {
-				Neighbor* neighbor = new Neighbor(src_ip);
-				neighbor->id	= ntohl(ospf_header->router_id);
-				neighbor->dr	= ntohl(ospf_hello->designated_router);
-				neighbor->bdr	= ntohl(ospf_hello->backup_designated_router);
-				neighbor->pri	= ntohl(ospf_hello->rtr_pri);
-				interface->add_neighbor(*neighbor);
-				debugf("RecvPacket: Add %s into neighbors\n", ip2string(neighbor->id));
-				iter = interface->find_neighbor(src_ip);
+			auto neighbor = interface->find_neighbor(src_ip);
+			if (neighbor == nullptr) {
+				Neighbor* neig = new Neighbor(src_ip);
+				interface->add_neighbor(neig);
+				debugf("RecvPacket: Add %s into neighbors\n", n_ip2string(ospf_header->router_id));
+				neighbor = interface->find_neighbor(src_ip);
+				/* 设置 pre DR 和 BDR 和当前一致，不触发事件 */
+				new2way = true;
+				pre_pri = ntohl(ospf_hello->rtr_pri);
+				pre_dr 	= ntohl(ospf_hello->designated_router);	
+				pre_bdr = ntohl(ospf_hello->backup_designated_router);
+			} else {
+				pre_pri = neighbor->pri;
+				pre_dr 	= neighbor->dr;
+				pre_bdr = neighbor->bdr;
 			}
+			neighbor->id	= ntohl(ospf_header->router_id);
+			neighbor->dr	= ntohl(ospf_hello->designated_router);
+			neighbor->bdr	= ntohl(ospf_hello->backup_designated_router);
+			neighbor->pri	= ntohl(ospf_hello->rtr_pri);
+
+			assert(neighbor != nullptr);
+			/* 收到 Hello 包 */
+			neighbor->event_hello_received();
+
+			/* 检查自己的 router id 是否在 Hello 报文中 */
+			uint32_t* ospf_hello_neighbor 	= (uint32_t*)(packet + sizeof(struct iphdr) + sizeof(OSPFHeader) + sizeof(OSPFHello));
+			uint32_t* ospf_end 				= (uint32_t*)(packet + sizeof(struct iphdr) + ntohs(ospf_header->packet_length));
+            bool b_2way = false;
+			for (;ospf_hello_neighbor != ospf_end; ++ospf_hello_neighbor) {
+				if (*ospf_hello_neighbor == htonl(myconfigs.router_id)) {
+					b_2way = true;
+					break;
+				}
+            }
+			if (b_2way) {
+				neighbor->event_2way_received();
+			} else {
+				neighbor->event_1way_received();
+				continue;
+			}
+
+			if (new2way) {
+				interface->event_neighbor_change();
+			} else if (pre_pri != neighbor->pri) {
+				interface->event_neighbor_change();
+			} else if (neighbor->dr == neighbor->ip && neighbor->bdr == 0x00000000 && interface->state == InterfaceState::S_WAITING) {
+				interface->event_backup_seen();
+			} else if (pre_dr != neighbor->ip && neighbor->dr == neighbor->ip) {
+				interface->event_neighbor_change();
+			} else if (pre_dr == neighbor->ip && neighbor->dr != neighbor->ip) {
+				interface->event_neighbor_change();
+			} else if (neighbor->bdr == neighbor->ip && interface->state == InterfaceState::S_WAITING) {
+				interface->event_backup_seen();
+			} else if (pre_bdr != neighbor->ip && neighbor->bdr == neighbor->ip) {
+				interface->event_neighbor_change();
+			} else if (pre_bdr == neighbor->ip && neighbor->bdr != neighbor->ip) {
+				interface->event_neighbor_change();
+			} 
 		}
 	}
 }

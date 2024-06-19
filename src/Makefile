@@ -2,7 +2,7 @@
 CXX = g++
 
 # 编译选项
-CXXFLAGS = -Iinclude -O2
+CXXFLAGS = -Iinclude -O2 -DDEBUG
 
 # 链接选项
 LDFLAGS = -O2

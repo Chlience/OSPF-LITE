@@ -3,19 +3,10 @@
 
 #include <cstdio>
 #include <cstdarg>
+#include <arpa/inet.h>
 
-#define DEBUG
-
-int debugf(const char *format, ...) {
-	#ifdef DEBUG
-    va_list args;
-    va_start(args, format);
-    int ret = vprintf(format, args);
-    va_end(args);
-	return ret;
-	#else
-	return 0;
-	#endif
-}
+int debugf(const char *format, ...);
+char* n_ip2string(in_addr_t ip);
+char* ip2string(uint32_t ip);
 
 #endif
