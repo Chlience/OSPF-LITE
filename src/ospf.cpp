@@ -124,7 +124,7 @@ void send_ospf_packet(uint32_t dst_ip,
 	free(ospf_packet);
 }
 
-void* send_ospf_hello_package_thread(void* inter) {
+void* send_ospf_hello_packet_thread(void* inter) {
 	Interface *interface = (Interface*)inter;
 
 	int socket_fd;
@@ -197,7 +197,7 @@ void* send_ospf_hello_package_thread(void* inter) {
 	}
 }
 
-void* recv_ospf_package_thread(void *inter) {
+void* recv_ospf_packet_thread(void *inter) {
 	Interface *interface = (Interface*)inter;
 
 	/* socket(AF_INET, SOCK_RAW, proto_ospf->p_proto) 无法正确接收包 */

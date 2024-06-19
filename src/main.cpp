@@ -43,8 +43,8 @@ int main() {
 	printf("[main]\t\tpthread_create: hello_sender_thread\n");
 	printf("[main]\t\tpthread_create: reciver_thread\n");
 
-	pthread_create(&hello_sender_thread, NULL, send_ospf_hello_package_thread, &interface);
-	pthread_create(&reciver_thread, NULL, recv_ospf_package_thread, &interface);
+	pthread_create(&hello_sender_thread, NULL, send_ospf_hello_packet_thread, &interface);
+	pthread_create(&reciver_thread, NULL, recv_ospf_packet_thread, &interface);
 
     pthread_join(hello_sender_thread, NULL);
     pthread_join(reciver_thread, NULL);
