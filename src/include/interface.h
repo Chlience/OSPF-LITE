@@ -6,6 +6,7 @@
 #include <set>
 
 #include "neighbor.h"
+#include "area.h"
 
 enum struct NetworkType : uint8_t {
     T_P2P = 1,
@@ -25,16 +26,34 @@ enum struct InterfaceState : uint8_t {
     S_DR,
 };
 
+enum struct ElectionType : uint8_t {
+    T_NORMAL = 0,
+    T_NODR,
+    T_NOBDR,
+};
+
 class Interface {
 	public:
 	NetworkType			type 	= NetworkType::T_BROADCAST; 
-	uint32_t			ip 	= 0;
-	uint32_t			network_mask = 0;
+	InterfaceState		state	= InterfaceState::S_DOWN;
+	uint32_t			ip_interface_address 	= 0;
+	uint32_t			ip_interface_mask 		= 0;
+	OSPFArea*			area 					= nullptr;
+	uint32_t			hello_interval			= 10;
+	uint32_t			router_dead_interval	= 40;
+	uint32_t			inf_trans_delay			= 1;
+	uint32_t			router_priority			= 1;
+	uint8_t				ospf_options			= 0x2;
+	// Hello Timer
+	// Wait Timer
+	std::list<Neighbor*> neighbors;
 	uint32_t			dr	= 0;
 	uint32_t			bdr = 0;
-	std::list<Neighbor*> neighbors;
-	InterfaceState		state	= InterfaceState::S_DOWN;
-	bool 				can_be_dr = true;
+	// Interface output cost
+	uint32_t			rxmt_interval	= 5;
+	uint32_t			au_type			= 0;
+
+    uint16_t    		mtu = 1500;
 
 	Interface() = default;
 	// ~Interface();
@@ -49,6 +68,7 @@ class Interface {
 	void event_loop_ind();
 	void event_unloop_ind();
 	void event_interface_down();
+	void call_election();
 };
 
 #endif

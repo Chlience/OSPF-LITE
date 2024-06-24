@@ -16,7 +16,7 @@ struct OSPFHeader {
 };	// 24 bytes
 
 struct OSPFHello {
-    uint32_t    network_mask;
+    uint32_t    ip_interface_mask;
     uint16_t    hello_interval;
     uint8_t     options;
     uint8_t     rtr_pri;
@@ -24,6 +24,16 @@ struct OSPFHello {
     uint32_t    designated_router;
     uint32_t    backup_designated_router;
 };  // 20 bytes
+
+struct OSPFDD {
+    uint16_t    interface_mtu;
+    uint8_t     options;
+    uint8_t     b_MS: 1;
+    uint8_t     b_M : 1;
+    uint8_t     b_I : 1;
+    uint8_t     b_other: 5;
+    uint32_t    dd_seq_num;
+};  // 8 bytes
 
 enum OSPFType: uint8_t {
     T_HELLO = 1,
@@ -37,5 +47,6 @@ int ospf_init();
 void send_ospf_packet(uint32_t dst_ip, const uint8_t ospf_type, const char* ospf_data, const size_t ospf_data_len);
 void* send_ospf_hello_packet_thread(void* interface);
 void* recv_ospf_packet_thread(void* interface);
+void* send_empty_dd_packet_thread(void* neighbor);
 
 #endif

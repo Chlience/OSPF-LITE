@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <netinet/ip.h>
 
+#include "link_state.h"
+
 enum struct NeighborState:uint8_t {
     S_DOWN = 0,
     S_ATTEMPT,
@@ -73,19 +75,33 @@ class Interface;
 class Neighbor {
 	public:
 	NeighborState	state;
+	/* 邻居是否为 master */
 	bool			is_master;
+	/* 当前被发往邻居的 DD 包序号 */
 	uint32_t		dd_seq_num;
+	/* Last received Database Description packet */
 	uint32_t		last_recv_dd_seq_num;
+	uint8_t			last_recv_dd_i : 1;
+	uint8_t			last_recv_dd_m : 1;
+	uint8_t			last_recv_dd_ms : 1;
+    uint8_t     	last_recv_dd_otjer : 5;
+	
+    char        	last_send_dd_data[1024];
+    uint32_t    	last_send_dd_data_len;
+
 	uint32_t		id;
-	uint32_t		pri;
+	uint8_t			pri;
 	uint32_t		ip;
-	uint32_t		opts;
+	uint8_t			options;
 	uint32_t		dr;
 	uint32_t		bdr;
-	uint32_t		link_state_retrans_list;
-	uint32_t		database_summary_list;
-	uint32_t		link_state_request_list;
+	std::list<LSAHeader>	link_state_retransmission_list;
+	std::list<LSAHeader>	database_summary_list;
+	std::list<LSAHeader>	link_state_request_list;
 	Interface*		interface;
+    pthread_t		empty_dd_sender;
+	bool			is_empty_dd_sender_running;
+	bool			empty_dd_sender_stop;
 
 	bool operator < (const Neighbor& other) const {
         return ip < other.ip; // 考虑要不要用 id 作为键
@@ -98,21 +114,23 @@ class Neighbor {
 		last_recv_dd_seq_num	= 0;
 		id		= 0;
 		pri		= 0;
-		opts	= 0;
+		options	= 0x2;
 		dr		= 0;
 		bdr		= 0;
-		link_state_retrans_list	= 0;
-		database_summary_list	= 0;
-		link_state_request_list	= 0;
 		interface	= nullptr;
+		last_send_dd_data_len 	= 0;
+		empty_dd_sender_stop	= false;
+		is_empty_dd_sender_running = false;
 	}
 
 	void event_hello_received();
 	void event_start(); // 仅在 NBMA 网络上的邻居相关
 	void event_2way_received();
 	void event_1way_received();
+	void event_adj_ok();
 	void event_negotiation_done();
 	void event_exchange_done();
+	void event_seq_number_mismatch();
 };
 
 #endif

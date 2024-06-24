@@ -5,19 +5,19 @@
 #include <stddef.h>
 #include <cstring>
 
-#include "ospf_interface.h"
+#include "area.h"
 
 struct GlobalConfig {
     const char* nic_name;
     uint32_t    ip;
-    uint32_t    network_mask;
+    uint32_t    ip_interface_mask;
     
     uint32_t    router_id;
 	uint32_t	hello_interval = 10;
 	uint32_t	dead_interval = 40;
 	uint32_t	wait_interval = 40;
 
-    OSPFArea*   area;
+    OSPFArea*       area;
 
     // Constructor
     GlobalConfig() {
