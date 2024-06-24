@@ -151,8 +151,19 @@ void Neighbor::event_exchange_done() {
 		}
 		else {
 			state = NeighborState::S_LOADING;
+			/* 发送 LSR 请求新的 LSA */
 			printf(" from EXCHANGE to LOADING\n");
 		}
+	} else {
+		printf(" REJECT\n");
+	}
+}
+
+void Neighbor::event_loading_done() {
+	printf("Neighbor %s event_loading_done", ip2string(ip));
+	if (state == NeighborState::S_LOADING) {
+		state = NeighborState::S_FULL;
+		printf(" from LOADING to FULL\n");
 	} else {
 		printf(" REJECT\n");
 	}

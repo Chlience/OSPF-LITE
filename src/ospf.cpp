@@ -208,16 +208,10 @@ void* send_ospf_hello_packet_thread(void* inter) {
 
 void* recv_ospf_packet_thread(void *inter) {
 	Interface *interface = (Interface*)inter;
-
-	/* socket(AF_INET, SOCK_RAW, proto_ospf->p_proto) 无法正确接收包 */
 	int socket_fd;
 	if ((socket_fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IP))) < 0) {
         perror("[Thread]RecvPacket: socket_fd init");
     }
-    // if ((socket_fd = socket(AF_INET, SOCK_RAW, proto_ospf->p_proto)) < 0) {
-    //     perror("SendHelloPacket: socket_fd init");
-    // }
-
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
 	strcpy(ifr.ifr_name, myconfigs.nic_name);
@@ -232,30 +226,54 @@ void* recv_ospf_packet_thread(void *inter) {
 	while (true) {
 		memset(frame, 0, 1514);
 		recv(socket_fd, frame, 1514, 0);
-
 		packet = frame + sizeof(struct ethhdr);
 		ip_header = (struct iphdr*)packet;
 
-		/* 检查是否是 OSPF 包 */
+		/* IP 校验和错误的包已被丢弃 */
+
+		/* 目的地址必须是接收接口地址或者是多播地址 */
+		/* ALLSPFRouters	224.0.0.5 */
+		/* ALLDRouter		224.0.0.6 */
+		dst.s_addr = ip_header->daddr;
+		if (dst.s_addr != htonl(interface->ip_interface_address)
+		&& dst.s_addr != inet_addr("224.0.0.5")
+		&& dst.s_addr != inet_addr("224.0.0.6")) {
+			continue;
+		}
+
+		/* 丢弃非 OSPF 包 */
 		if (ip_header->protocol != proto_ospf->p_proto) {
 			continue;
-		} else {
-			// debugf("RecvPacket: OSPF packet\n");
 		}
 
-		/* 检查发送的对象是否是本机 or 广播地址 */
-
+		/* 检查发送的对象是否是本机 */
 		src.s_addr = ip_header->saddr;
-		dst.s_addr = ip_header->daddr;
-
-		if (dst.s_addr != htonl(interface->ip_interface_address) && dst.s_addr != inet_addr("224.0.0.5")) {
+		if (src.s_addr == htonl(interface->ip_interface_address)) {
 			continue;
 		}
 
-		/* 解析 OSPF 包 */
+		/* 校验 OSPF 包头 */
 		OSPFHeader* ospf_header = (OSPFHeader*)(packet + sizeof(struct iphdr));
-		
+		if (ospf_header->version != 2) {
+			continue;
+		}
+		if (ospf_header->area_id != htonl(interface->area->id)) {
+			/* 源和目的接口是否在同一网络上校验略过 */
+			continue;
+		}
+		if (dst.s_addr == inet_addr("224.0.0.6")) {
+			if (interface->state != InterfaceState::S_DR && interface->state != InterfaceState::S_BACKUP) {
+				continue;
+			}
+		}
+		if (ospf_header->autype != interface->au_type) {
+			continue;
+		}
+		/* 仅支持空验证 */
+
+		/* 接收到一个合法的 OSPF 包 */
 		debugf("RecvPacket: from %s", inet_ntoa(src));
+
 		/* 处理 Hello 包 */
 		if (ospf_header->type == T_HELLO) {
 			debugf(" Hello packet\n");
@@ -570,8 +588,14 @@ void* recv_ospf_packet_thread(void *inter) {
 				}
 			}
 			free(send_dd_data);
+		} else if (ospf_header->type == T_LSU) {
+			debugf(" LSU packet <TODO>\n");
+		} else if (ospf_header->type == T_LSR) {
+			debugf(" LSR packet <TODO>\n");
+		} else if (ospf_header->type == T_LSAck) {
+			debugf(" LSAck packet <TODO>\n");
 		} else {
-			debugf(" <TODO> packet\n");
+			debugf(" Unsupport packet\n");
 		}
 	}
 	free(frame);

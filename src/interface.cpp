@@ -40,7 +40,7 @@ void Interface::event_interface_up() {
 }
 
 void Interface::event_wait_timer() {
-    
+    /* TODO */
 }
 
 void Interface::event_backup_seen() {

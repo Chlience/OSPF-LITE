@@ -124,12 +124,12 @@ class Neighbor {
 	}
 
 	void event_hello_received();
-	void event_start(); // 仅在 NBMA 网络上的邻居相关
 	void event_2way_received();
 	void event_1way_received();
 	void event_adj_ok();
 	void event_negotiation_done();
 	void event_exchange_done();
+	void event_loading_done();
 	void event_seq_number_mismatch();
 };
 
