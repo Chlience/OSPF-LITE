@@ -18,6 +18,7 @@ struct LSAHeader {
 }; // 20 bytes
 
 int lsa_header_cmp(const LSAHeader*, const LSAHeader*);
+uint16_t lsa_checksum(const LSAHeader*);
 
 enum LSAType : uint8_t {
 	LSA_ROUTER = 1,

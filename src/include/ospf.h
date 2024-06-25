@@ -35,6 +35,10 @@ struct OSPFDD {
     uint32_t    dd_seq_num;
 };  // 8 bytes
 
+struct OSPFLsu {
+    uint32_t    num;
+};
+
 enum OSPFType: uint8_t {
     T_HELLO = 1,
     T_DD,

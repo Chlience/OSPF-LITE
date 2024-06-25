@@ -458,47 +458,47 @@ void* recv_ospf_packet_thread(void *inter) {
 			}
 			
 			/* 接收到一个序号匹配的 DD 包 */
+			LSAHeader* lsa_header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
 			LSAHeader* lsa_header_end	= (LSAHeader*)(packet + sizeof(iphdr) + ntohs(ospf_header->packet_length));
 			/* 检查 lsa_type */
-			for (LSAHeader* header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
-			header != lsa_header_end; ++header) {
-				if (header->ls_type < 1 || header->ls_type > 5) {
+			for (; lsa_header != lsa_header_end; ++lsa_header) {
+				if (lsa_header->ls_type < 1 || lsa_header->ls_type > 5) {
 					debugf("DD packet REJECT for invalid LSA Header\n");
 					neighbor->event_seq_number_mismatch();
 					continue;
 				}
 				/* TODO ls_type == 5 && 邻居关联到存根区域 */
-				// if (header->ls_type == 5)
+				// if (lsa_header->ls_type == 5)
 			}
 			/* 对比 dd 和 lsdb 中的 LSA Header */
 			LSDB* lsdb = &interface->area->lsdb;
-			for (LSAHeader* header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
-			header != lsa_header_end; ++header) {
-				LSAHeader lsa_header;
-				lsa_header.ls_age 				= ntohs(header->ls_age);
-				lsa_header.options 				= header->options;
-				lsa_header.ls_type 				= header->ls_type;
-				lsa_header.link_state_id 		= ntohl(header->link_state_id);
-				lsa_header.advertising_router 	= ntohl(header->advertising_router);
-				lsa_header.ls_seq_num 			= ntohl(header->ls_seq_num);
-				lsa_header.ls_checksum 			= ntohs(header->ls_checksum);
-				lsa_header.length 				= ntohs(header->length);
-				if (lsa_header.ls_type == LSA_ROUTER) {
-					LSARouter* lsa_router = lsdb->find_router_lsa(lsa_header.link_state_id, lsa_header.advertising_router);
+			lsa_header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
+			for (; lsa_header != lsa_header_end; ++lsa_header) {
+				LSAHeader header;
+				header.ls_age 				= ntohs(lsa_header->ls_age);
+				header.options 				= lsa_header->options;
+				header.ls_type 				= lsa_header->ls_type;
+				header.link_state_id 		= ntohl(lsa_header->link_state_id);
+				header.advertising_router 	= ntohl(lsa_header->advertising_router);
+				header.ls_seq_num 			= ntohl(lsa_header->ls_seq_num);
+				header.ls_checksum 			= ntohs(lsa_header->ls_checksum);
+				header.length 				= ntohs(lsa_header->length);
+				if (header.ls_type == LSA_ROUTER) {
+					LSARouter* lsa_router = lsdb->find_router_lsa(header.link_state_id, header.advertising_router);
 					if (lsa_router == nullptr) {
-						neighbor->link_state_request_list.push_back(lsa_header);
+						neighbor->link_state_request_list.push_back(header);
 					} else {
-						if (lsa_header_cmp(&lsa_header, &lsa_router->header) < 0) {
-							neighbor->link_state_request_list.push_back(lsa_header);
+						if (lsa_header_cmp(&header, &lsa_router->header) < 0) {
+							neighbor->link_state_request_list.push_back(header);
 						}
 					}
-				} else if (lsa_header.ls_age == LSA_NETWORK) {
-					LSANetwork* lsa_network = lsdb->find_network_lsa(lsa_header.link_state_id, lsa_header.advertising_router);
+				} else if (header.ls_age == LSA_NETWORK) {
+					LSANetwork* lsa_network = lsdb->find_network_lsa(header.link_state_id, header.advertising_router);
 					if (lsa_network == nullptr) {
-						neighbor->link_state_request_list.push_back(lsa_header);
+						neighbor->link_state_request_list.push_back(header);
 					} else {
-						if (lsa_header_cmp(&lsa_header, &lsa_network->header) < 0) {
-							neighbor->link_state_request_list.push_back(lsa_header);
+						if (lsa_header_cmp(&header, &lsa_network->header) < 0) {
+							neighbor->link_state_request_list.push_back(header);
 						}
 					}
 				} else {
@@ -517,7 +517,6 @@ void* recv_ospf_packet_thread(void *inter) {
 			send_ospf_dd->interface_mtu = htons(neighbor->interface->mtu);
 			send_ospf_dd->options = 0x02;
 			send_ospf_dd->b_I = 0;
-			LSAHeader* header = (LSAHeader*)(send_dd_data + sizeof(OSPFDD));
 
 			if (neighbor->is_master) {
 				send_ospf_dd->b_MS 			= 0;
@@ -530,6 +529,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					}
 				}
 				send_ospf_dd->b_M			= !neighbor->database_summary_list.empty();
+				LSAHeader* header = (LSAHeader*)(send_dd_data + sizeof(OSPFDD));
 				for (auto lsa_header: neighbor->database_summary_list) {
 					if (send_dd_data_len + sizeof(LSAHeader) > 1024) {
 						break;
@@ -563,6 +563,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					}
 				}
 				send_ospf_dd->b_M			= !neighbor->database_summary_list.empty();
+				LSAHeader* header = (LSAHeader*)(send_dd_data + sizeof(OSPFDD));
 				for (auto lsa_header: neighbor->database_summary_list) {
 					if (send_dd_data_len + sizeof(LSAHeader) > 1024) {
 						break;
@@ -590,6 +591,18 @@ void* recv_ospf_packet_thread(void *inter) {
 			free(send_dd_data);
 		} else if (ospf_header->type == T_LSU) {
 			debugf(" LSU packet <TODO>\n");
+			OSPFLsu* ospf_lsu = (OSPFLsu*)(packet + sizeof(iphdr) + sizeof(OSPFHeader));
+			int lsa_num = ntohl(ospf_lsu->num);
+
+			Neighbor* neighbor = interface->find_neighbor(ntohl(src.s_addr));
+			assert(neighbor != nullptr);
+			
+			char* lsa_header_ptr = (char*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFLsu));
+			for (int i = 0; i < lsa_num; ++i) {
+				LSAHeader* lsa_header = (LSAHeader*)lsa_header_ptr;
+				debugf("%x %x\n", lsa_header->ls_checksum, lsa_checksum(lsa_header));
+				lsa_header_ptr += ntohl(lsa_header->length);
+			}
 		} else if (ospf_header->type == T_LSR) {
 			debugf(" LSR packet <TODO>\n");
 		} else if (ospf_header->type == T_LSAck) {
