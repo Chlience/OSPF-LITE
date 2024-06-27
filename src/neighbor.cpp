@@ -47,7 +47,9 @@ void Neighbor::event_1way_received() {
 		state = NeighborState::S_INIT;
 		link_state_retransmission_list.clear();
 		database_summary_list.clear();
+		pthread_mutex_lock(&lsr_mutex);
 		link_state_request_list.clear();
+		pthread_mutex_unlock(&lsr_mutex);
 	}
 	else if (state == NeighborState::S_INIT) {
 		printf("\n");
@@ -96,7 +98,9 @@ void Neighbor::event_adj_ok() {
 		} else {
 			state = NeighborState::S_2WAY;
 			database_summary_list.clear();
+			pthread_mutex_lock(&lsr_mutex);
 			link_state_request_list.clear();
+			pthread_mutex_unlock(&lsr_mutex);
 			printf(" from EXSTART or higher state to 2WAY\n");
 		}
 	} else {
@@ -125,9 +129,12 @@ void Neighbor::event_seq_number_mismatch() {
 	printf("Neighbor %s event_seq_number_mismatch", ip2string(ip));
 	if (state >= NeighborState::S_EXCHANGE) {
 		state = NeighborState::S_EXSTART;
+
 		link_state_retransmission_list.clear();
 		database_summary_list.clear();
+		pthread_mutex_lock(&lsr_mutex);
 		link_state_request_list.clear();
+		pthread_mutex_unlock(&lsr_mutex);
 		if (is_empty_dd_sender_running == false) {
 			pthread_create(&empty_dd_sender, nullptr, send_empty_dd_packet_thread, (void*)this);
 		} else {
@@ -151,7 +158,7 @@ void Neighbor::event_exchange_done() {
 		}
 		else {
 			state = NeighborState::S_LOADING;
-			/* 发送 LSR 请求新的 LSA */
+			pthread_create(&lsr_sender, nullptr, send_lsr_packet_thread, (void*)this);
 			printf(" from EXCHANGE to LOADING\n");
 		}
 	} else {
@@ -167,4 +174,9 @@ void Neighbor::event_loading_done() {
 	} else {
 		printf(" REJECT\n");
 	}
+}
+
+void Neighbor::event_bad_ls_req() {
+	printf("Neighbor %s event_bad_ls_req", ip2string(ip));
+	perror("Not implemented yet\n");
 }

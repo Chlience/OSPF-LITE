@@ -6,25 +6,21 @@
 #include "config.h"
 #include "interface.h"
 #include "debug.h"
+#include "area.h"
 
 GlobalConfig myconfigs = GlobalConfig();
 
-void config_init() {
-	myconfigs.nic_name		= "eth0";	// 手动设定
-	myconfigs.ip			= get_ip_address(myconfigs.nic_name);
-	myconfigs.ip_interface_mask	= get_network_mask(myconfigs.nic_name);
-	
-	myconfigs.router_id = 0x08080808;	// 手动设定
-	myconfigs.area = new OSPFArea(0);
+std::vector<Interface*> interfaces;
+std::vector<OSPFArea*> areas;
 
-	OSPFNetwork* network = new OSPFNetwork();
-	network->ip		    	= myconfigs.ip;
-	network->wildcard_mask 	= ~myconfigs.ip_interface_mask;
-	myconfigs.area->networks.push_back(network);
+void config_init() {
+	myconfigs.nic_name			= "eth0";	// 手动设定
+	myconfigs.ip				= get_ip_address(myconfigs.nic_name);
+	myconfigs.ip_interface_mask	= get_network_mask(myconfigs.nic_name);
+	myconfigs.router_id 		= 0x08080808;	// 手动设定
 }
 
 void interface_init(Interface* interface) {
-	interface->area						= myconfigs.area;
 	interface->ip_interface_address		= myconfigs.ip;
 	interface->ip_interface_mask		= myconfigs.ip_interface_mask;
 }
@@ -32,10 +28,23 @@ void interface_init(Interface* interface) {
 int main() {
 	config_init();
 	ospf_init();
-	
+
 	Interface interface;
+	interfaces.push_back(&interface);
+	OSPFArea area = OSPFArea(0);
+	areas.push_back(&area);
+	
 	interface_init(&interface);
 	interface.event_interface_up();
+
+	OSPFNetwork network = OSPFNetwork(myconfigs.ip, ~myconfigs.ip_interface_mask);
+	area.networks.push_back(&network);
+	for (auto inter : interfaces) {
+		if ((inter->ip_interface_address & inter->ip_interface_mask) == (network.ip & (~network.wildcard_mask))) {
+			area.interfaces.push_back(inter);
+			inter->area = &area;
+		}
+	}
 	
     pthread_t ospf_hello_sender;
     pthread_t ospf_reciver;

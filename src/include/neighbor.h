@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <netinet/ip.h>
+#include <pthread.h>
 
 #include "link_state.h"
 
@@ -95,13 +96,17 @@ class Neighbor {
 	uint8_t			options;
 	uint32_t		dr;
 	uint32_t		bdr;
-	std::list<LSAHeader>	link_state_retransmission_list;
-	std::list<LSAHeader>	database_summary_list;
-	std::list<LSAHeader>	link_state_request_list;
+	std::list<LSAHeader>	link_state_retransmission_list;	// flooding 而没有确认的列表
+	std::list<LSAHeader>	database_summary_list;			// 需要通过 DD 包发送的 LSA 列表
+	std::list<LSAHeader>	link_state_request_list;		// 通过 DD 包获得需要同步的的未知 LSA 或者已知 LSA 的最新拷贝
 	Interface*		interface;
-    pthread_t		empty_dd_sender;
+	pthread_t		empty_dd_sender;
 	bool			is_empty_dd_sender_running;
 	bool			empty_dd_sender_stop;
+
+	pthread_t		lsr_sender;
+	pthread_mutex_t lsr_mutex;
+	pthread_cond_t	lsr_cond;
 
 	bool operator < (const Neighbor& other) const {
         return ip < other.ip; // 考虑要不要用 id 作为键
@@ -121,6 +126,8 @@ class Neighbor {
 		last_send_dd_data_len 	= 0;
 		empty_dd_sender_stop	= false;
 		is_empty_dd_sender_running = false;
+		lsr_mutex		= PTHREAD_MUTEX_INITIALIZER;
+		lsr_cond		= PTHREAD_COND_INITIALIZER;
 	}
 
 	void event_hello_received();
@@ -131,6 +138,7 @@ class Neighbor {
 	void event_exchange_done();
 	void event_loading_done();
 	void event_seq_number_mismatch();
+	void event_bad_ls_req();
 };
 
 #endif

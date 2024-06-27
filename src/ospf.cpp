@@ -19,6 +19,8 @@
 #include "link_state.h"
 
 extern GlobalConfig myconfigs;
+// extern std::vector<OSPFArea*> areas;
+// extern std::vector<Interface*> interfaces; 
 
 struct protoent *proto_ospf;
 
@@ -123,7 +125,7 @@ void send_ospf_packet(uint32_t dst_ip,
 		perror("SendPacket: sendto");
 	}
 	else {
-		printf("SendPacket: type %d send success, len %ld\n", ospf_type, ospf_data_len);
+		printf("SendPacket: type %d to %s send success, len %ld\n", ospf_type, inet_ntoa(dst_sockaddr.sin_addr), ospf_data_len);
 	}
 	free(ospf_packet);
 }
@@ -473,6 +475,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			/* 对比 dd 和 lsdb 中的 LSA Header */
 			LSDB* lsdb = &interface->area->lsdb;
 			lsa_header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
+			pthread_mutex_lock(&neighbor->lsr_mutex);
 			for (; lsa_header != lsa_header_end; ++lsa_header) {
 				LSAHeader header;
 				header.ls_age 				= ntohs(lsa_header->ls_age);
@@ -506,6 +509,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					continue;
 				}
 			}
+			pthread_mutex_unlock(&neighbor->lsr_mutex);
 
 			/* 发送一个 DD 包 */
 			char* send_dd_data = (char*)malloc(1024);
@@ -528,7 +532,7 @@ void* recv_ospf_packet_thread(void *inter) {
 						--cnt;
 					}
 				}
-				send_ospf_dd->b_M			= !neighbor->database_summary_list.empty();
+				send_ospf_dd->b_M = !neighbor->database_summary_list.empty();
 				LSAHeader* header = (LSAHeader*)(send_dd_data + sizeof(OSPFDD));
 				for (auto lsa_header: neighbor->database_summary_list) {
 					if (send_dd_data_len + sizeof(LSAHeader) > 1024) {
@@ -562,7 +566,7 @@ void* recv_ospf_packet_thread(void *inter) {
 						--cnt;
 					}
 				}
-				send_ospf_dd->b_M			= !neighbor->database_summary_list.empty();
+				send_ospf_dd->b_M = !neighbor->database_summary_list.empty();
 				LSAHeader* header = (LSAHeader*)(send_dd_data + sizeof(OSPFDD));
 				for (auto lsa_header: neighbor->database_summary_list) {
 					if (send_dd_data_len + sizeof(LSAHeader) > 1024) {
@@ -589,22 +593,194 @@ void* recv_ospf_packet_thread(void *inter) {
 				}
 			}
 			free(send_dd_data);
+		} else if (ospf_header->type == T_LSR) {
+			/* DR 和 BDR 向多播地址 ALLSPFRouters 发送 LSU 和 LSAck */
+			/* 其他路由器向多播地址 ALLDRouters 发送 LSU 和 LSAck */
+			/* 重传的 LSU 包直接被发往邻居 */
+			debugf(" LSR packet <TODO>\n");
 		} else if (ospf_header->type == T_LSU) {
-			debugf(" LSU packet <TODO>\n");
+			debugf(" LSU packet\n");
 			OSPFLsu* ospf_lsu = (OSPFLsu*)(packet + sizeof(iphdr) + sizeof(OSPFHeader));
 			int lsa_num = ntohl(ospf_lsu->num);
 
 			Neighbor* neighbor = interface->find_neighbor(ntohl(src.s_addr));
 			assert(neighbor != nullptr);
+
+			LSDB* lsdb = &interface->area->lsdb;
 			
 			char* lsa_header_ptr = (char*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFLsu));
-			for (int i = 0; i < lsa_num; ++i) {
-				LSAHeader* lsa_header = (LSAHeader*)lsa_header_ptr;
-				debugf("%x %x\n", lsa_header->ls_checksum, lsa_checksum(lsa_header));
-				lsa_header_ptr += ntohl(lsa_header->length);
+			LSAHeader* lsa_header;
+			LSAHeader* lsa_header_host = new LSAHeader();
+
+			char* lsack_data = (char*)malloc(1024);
+            LSAHeader* lsack_lsa_header = (LSAHeader*)lsack_data;
+			bool bad_ls_req = false;
+
+			/* 接收到的 LSU 包有三种可能 */
+			/* 一种组播，用于宣告新信息 */
+			/* 一种直接发向邻居，用于重传 flooding */
+			/* 一种直接发向邻居，用于同步邻居 */
+			/* 两者通过 dst.ip 和 state 进行区分 */
+			for (int i = 0; i < lsa_num; ++i, lsa_header_ptr += ntohl(lsa_header->length)) {
+				lsa_header = (LSAHeader*)lsa_header_ptr;
+				memcpy(lsa_header_host, LSAHeader::ntoh((LSAHeader*)lsa_header_ptr), sizeof(LSAHeader));
+				/* 1. 检查 LS CHECKSUM */
+				if (lsa_header->ls_checksum != htons(lsa_checksum(lsa_header))) {
+					continue;	
+				}
+				/* 2. 检查 LS TYPE */
+				if (lsa_header_host->ls_type < 1 || lsa_header_host->ls_type > 5) {
+					continue;
+				}
+				/* 3. TODO 检查是否是外部 LSA */
+				if (lsa_header_host->ls_type == LSA_ASEXTERNAL) {
+					perror("TODO: LSA_ASEXTERNAL\n");
+				}
+				/* 4. 如果 LSA 的 LS 时限等于 MaxAge，
+				而且路由器的连接状态数据库中没有该 LSA 的实例，
+				而且路由器的邻居都不处于 Exchange 或 Loading 状态 */
+				/* 清除 LS，且保证不影响处在同步其链路状态数据库的节点 */
+				bool neighbor_loading_or_exchange = false;
+				for (auto nei : interface->neighbors) {
+					if (nei->state == NeighborState::S_EXCHANGE || nei->state == NeighborState::S_LOADING) {
+						neighbor_loading_or_exchange = true;
+						break;
+					}
+				}
+				if (lsa_header_host->ls_age == MAX_AGE && !neighbor_loading_or_exchange) {
+					/* a. 立即发送一个 LSAck 包到发送的邻居 */
+					send_ospf_packet(ntohl(src.s_addr), T_LSAck, lsa_header_ptr, sizeof(LSAHeader), interface);
+					/* b. 丢弃该 LSA */
+					continue;
+				}
+				/* 5. 查找当前包含在路由器链路状态数据库中的此 LSA 的实例。
+				如果没有数据库副本，或者收到的 LSA 比数据库副本更新 */
+				bool lsa_exist = false;
+				int lsa_cmp_result = 0;
+				bool lsa_self = false;
+				void* lsdb_lsa = nullptr;
+				if (lsa_header_host->ls_type == LSA_ROUTER) {
+					lsdb_lsa = (void*)lsdb->find_router_lsa(lsa_header_host->link_state_id, lsa_header_host->advertising_router);
+					if (lsdb_lsa != nullptr) {
+						LSARouter* tmp = (LSARouter*)lsdb_lsa;
+						lsa_exist = true;
+						lsa_cmp_result = lsa_header_cmp(lsa_header_host, &tmp->header);
+						lsa_self = tmp->header.advertising_router == htonl(myconfigs.router_id);
+					}
+				} else if (lsa_header_host->ls_type == LSA_NETWORK) {
+					lsdb_lsa = (void*)lsdb->find_network_lsa(lsa_header_host->link_state_id, lsa_header_host->advertising_router);
+					if (lsdb_lsa != nullptr) {
+						LSANetwork* tmp = (LSANetwork*)lsdb_lsa;
+						lsa_exist = true;
+						lsa_cmp_result = lsa_header_cmp(lsa_header_host, &tmp->header);
+						perror("No complement!\n");
+					}
+				} else {
+					perror("No complement!\n");
+				}
+				if (lsa_exist == false || lsa_cmp_result < 0) {
+					/* a TODO 如果存在数据库副本，且通过 flooding，在不到 MinLSArrival 时间内接受，则丢弃 */
+					/* 路由器不处理在 MinLSArrival 内的 LSA，从而提高稳定性 */
+					/* 简化：认为所有包都在 MinLSArrival 间隔外更新 */
+					if (lsa_exist == true && lsa_self == false && false) {
+						continue;
+					}
+					/* b 立即 flooding（某些接口），见 13.3 */
+					bool flooding_from_this_interface = false;
+					for (auto inter: interface->area->interfaces) {
+						if (inter == interface) {
+							if (flooding_lsa(lsa_header_ptr, inter, true, src) == 0) {
+								flooding_from_this_interface = true;
+							}
+						} else {
+							flooding_lsa(lsa_header_ptr, inter, false, src);
+						}
+					}
+					/* c 从所有邻居的链路状态重传列表中删除当前数据库副本（防止旧的继续被重传） */
+					for (auto nei : interface->neighbors) {
+						nei->link_state_retransmission_list.remove_if([&lsa_header_host](LSAHeader& lsa) {
+							return lsa.link_state_id == lsa_header_host->link_state_id
+								&& lsa.advertising_router == lsa_header_host->advertising_router;
+						});
+					}
+					/* d 在链接状态数据库中安装新 LSA */
+					if (lsa_header_host->ls_type == LSA_ROUTER) {
+						lsdb->install_lsa_router((LSAHeader*)lsa_header_ptr);
+					} else if (lsa_header_host->ls_type == LSA_NETWORK) {
+						// lsdb->install_lsa_network((LSAHeader*)lsa_header_ptr);
+						perror("TODO: install_lsa_network\n");
+					}
+					/* e 可能通过向接收接口发回链路状态确认包来确认 LSA 的接收 */
+					/* 13.5 如果向原接口泛洪，则不发送确认 */
+					/* 否则延迟确认 */
+					if (!flooding_from_this_interface) {
+						if (interface->state == InterfaceState::S_BACKUP) {
+							if (src.s_addr == htonl(interface->dr)) {
+								memcpy(lsack_lsa_header, lsa_header_ptr, sizeof(LSAHeader));
+								++lsack_lsa_header;
+							}
+						} else {
+							memcpy(lsack_lsa_header, lsa_header_ptr, sizeof(LSAHeader));
+							++lsack_lsa_header;
+						}
+					}
+					/* f TODO 自生成 LSA 特殊操作 */
+					if (lsa_self) {
+						perror("TODO: self generate LSA\n");
+					}
+					continue;
+				}
+				/* 6. 如果发送邻居的链路状态请求列表上存在 LSA 实例，则数据库交换过程中发生错误 */
+				for (auto header: neighbor->link_state_request_list) {
+					if (header.link_state_id == lsa_header_host->link_state_id
+					&& header.advertising_router == lsa_header_host->advertising_router) {
+						bad_ls_req = true;
+						break;
+					}
+				}
+				if (bad_ls_req) {
+					neighbor->event_bad_ls_req();
+					break;
+				}
+				/* 7. 如果收到的LSA与数据库副本是同一实例 */
+				if (lsa_cmp_result == 0) {
+					/* a 如果LSA列在接收邻接的链路状态重传列表中，
+					则路由器本身期望该LSA得到确认。
+					路由器应通过从链路状态重传列表中删除LSA，
+					将收到的LSA视为确认。
+					这被称为“默示承认”。应注意其出现情况，以供确认流程稍后使用 */
+					neighbor->link_state_retransmission_list.remove_if([&lsa_header_host](LSAHeader& lsa) {
+						return lsa.link_state_id == lsa_header_host->link_state_id
+							&& lsa.advertising_router == lsa_header_host->advertising_router;
+					});
+					/* b TODO 可能通过向接收接口发回链路状态确认包来确认LSA的接收 */
+					/* 如果自身是 BDR，且来自 DR，则发送延迟确认 */
+					if (interface->state == InterfaceState::S_BACKUP) {
+						perror("TODO: delay ack\n");
+					}
+				}
+				/* 8 此时数据库副本较近 */
+				if (lsa_header_host->ls_type == LSA_ROUTER) {
+					LSARouter* lsa_router = (LSARouter*)lsdb_lsa;
+					if (lsa_router->header.ls_age == MAX_AGE && lsa_router->header.ls_seq_num == MAX_SEQUENCE_NUMBER) {
+						continue;
+					} else {
+						// 发送一个 LSU 包给邻居
+						perror("send a newer LSU");
+						continue;
+					}
+				} else if (lsa_header_host->ls_type == LSA_NETWORK) {
+					// lsdb->install_lsa_network((LSAHeader*)lsa_header_ptr);
+					perror("TODO: install_lsa_network\n");
+				} else {
+					perror("No complement!\n");
+				}
 			}
-		} else if (ospf_header->type == T_LSR) {
-			debugf(" LSR packet <TODO>\n");
+			size_t lsack_length = (char*)lsack_lsa_header - lsack_data;
+			if (!bad_ls_req && lsack_length > 0) {
+				send_ospf_packet(ntohl(src.s_addr), T_LSAck, lsack_data, (char*)lsack_lsa_header - lsack_data, interface);
+			}
+			delete lsa_header_host;
 		} else if (ospf_header->type == T_LSAck) {
 			debugf(" LSAck packet <TODO>\n");
 		} else {
@@ -637,4 +813,126 @@ void* send_empty_dd_packet_thread(void* neigh) {
 	delete ospf_dd;
 	neighbor->is_empty_dd_sender_running = false;
 	pthread_exit(NULL);
+}
+
+/**
+ * LSR				-> LSU(point)
+ * LSU(flooding) 	-> LSAck
+ * LSU(flooding) 	-> without LSAck	-> LSU(point)
+ * 方案 1
+ * 	发送 LSR 和接受 LSU 包放在一起
+ * 	每次发送完 LSR 等待 LSU 包到达或者计时器超时后再次发送 LSR
+ * 方案 2
+ * 	发送 LSR 和接受 LSU 包分开
+ * 	需要进程间通信
+ * 如果当前 link_state_request_list 为空，说明状态已经转移，线程退出
+ */
+void *send_lsr_packet_thread(void* neigh) {
+	Neighbor* neighbor = (Neighbor*)neigh;
+	void* data = malloc(1024);
+	bool is_first = true;
+	struct timespec ts;
+	while (true) {
+		pthread_mutex_lock(&neighbor->lsr_mutex);
+		if (!is_first) {
+			clock_gettime(CLOCK_REALTIME, &ts);
+			ts.tv_sec += neighbor->interface->rxmt_interval;
+			pthread_cond_timedwait(&neighbor->lsr_cond, &neighbor->lsr_mutex, &ts);
+			if (neighbor->link_state_request_list.empty()) {
+				pthread_mutex_unlock(&neighbor->lsr_mutex);
+				break;
+			}
+		} else {
+			is_first = false;
+		}
+
+		char* send_lsr_data = (char*)data;
+		uint32_t send_lsr_data_len = 0;
+		OSPFLsr* lsr = (OSPFLsr* ) send_lsr_data;
+		
+		for (auto& req_lsa_header: neighbor->link_state_request_list) {
+			if (send_lsr_data_len + sizeof(OSPFLsr) > 1024) {
+				break;
+			}
+			lsr->ls_type = htonl(req_lsa_header.ls_type);
+			lsr->link_state_id = htonl(req_lsa_header.link_state_id);
+			lsr->advertising_router = htonl(req_lsa_header.advertising_router);
+
+			lsr++;
+			send_lsr_data_len += sizeof(OSPFLsr);
+		}
+		send_ospf_packet(neighbor->ip, T_LSR, send_lsr_data, send_lsr_data_len, neighbor->interface);
+		pthread_mutex_unlock(&neighbor->lsr_mutex);
+	}
+	free(data);
+	return nullptr;
+}
+
+int flooding_lsa(void* lsa_header_ptr, Interface* interface, bool is_origin, in_addr src) {
+	LSAHeader* lsa_header_host = new LSAHeader();
+	memcpy(lsa_header_host, LSAHeader::ntoh((LSAHeader*)lsa_header_ptr), sizeof(LSAHeader));
+
+	if (lsa_header_host->ls_type == 5) {
+		// TOOD
+	} else {
+		/* 1. 检查邻居 */
+		bool add_new_lsa_transmission = false;
+		for (auto nei : interface->neighbors) {
+			if (nei->state < NeighborState::S_EXCHANGE) {
+				continue;
+			}
+			if (nei->state == NeighborState::S_EXCHANGE || nei->state == NeighborState::S_LOADING) {
+				auto it = std::find_if(nei->link_state_request_list.begin(), nei->link_state_request_list.end(), [&lsa_header_host](LSAHeader& lsa) {
+					return lsa.link_state_id == lsa_header_host->link_state_id
+						&& lsa.advertising_router == lsa_header_host->advertising_router;
+				});
+				if (it != nei->link_state_request_list.end()) {
+					int lsa_cmp_result = lsa_header_cmp(lsa_header_host, &*it);
+					if (lsa_cmp_result == 0) {
+						nei->link_state_request_list.erase(it);
+						continue;
+					} else if (lsa_cmp_result < 0) {
+						nei->link_state_request_list.erase(it);
+					} else {
+						continue;
+					}
+					if (src.s_addr == htonl(nei->ip)) {
+						continue;
+					} else {
+						nei->link_state_retransmission_list.push_back(*lsa_header_host);
+						add_new_lsa_transmission = true;
+					}
+				} else {
+					nei->link_state_retransmission_list.push_back(*lsa_header_host);
+					add_new_lsa_transmission = true;
+				}
+			}
+		}
+		/* 2. 决定是否泛洪 */
+		if (add_new_lsa_transmission == true) {
+			/* 3. 如果是该接口接收，且为 DR 或 BDR 发送，检查下一个接口 */
+			/* 简化，只有当前接口 */
+			if (src.s_addr == htonl(interface->dr) || src.s_addr == htonl(interface->bdr)) {
+				/* do nothing */
+			} else if (interface->state == InterfaceState::S_BACKUP) {
+				/* do nothing */
+			} else {
+				/* 4. 向所有邻居发送 LSA */
+				char *buffer = (char*)malloc(1024);
+				OSPFLsu* lsu = (OSPFLsu*)buffer;
+				lsu->num = htonl(1);
+				LSAHeader* lsa = (LSAHeader*)(buffer + sizeof(OSPFLsu));
+				memcpy(lsa, lsa_header_ptr, lsa_header_host->length);
+
+				if (interface->state == InterfaceState::S_DR || interface->state == InterfaceState::S_BACKUP) {
+					send_ospf_packet(inet_addr("224.0.0.5"), T_LSU, buffer, sizeof(OSPFLsu) + lsa_header_host->length, interface);
+				} else {
+					send_ospf_packet(inet_addr("224.0.0.6"), T_LSU, buffer, sizeof(OSPFLsu) + lsa_header_host->length, interface);
+				}
+				free(buffer);
+				return 0;
+			}
+		} 
+	}
+	return -1;
 }

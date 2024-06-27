@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <stddef.h>
 
+#include "interface.h"
+
 struct OSPFHeader {
     uint8_t     version;
     uint8_t     type;
@@ -35,6 +37,12 @@ struct OSPFDD {
     uint32_t    dd_seq_num;
 };  // 8 bytes
 
+struct OSPFLsr {
+    uint32_t    ls_type;
+    uint32_t    link_state_id;
+    uint32_t    advertising_router;
+};  // 12 bytes
+
 struct OSPFLsu {
     uint32_t    num;
 };
@@ -52,5 +60,6 @@ void send_ospf_packet(uint32_t dst_ip, const uint8_t ospf_type, const char* ospf
 void* send_ospf_hello_packet_thread(void* interface);
 void* recv_ospf_packet_thread(void* interface);
 void* send_empty_dd_packet_thread(void* neighbor);
-
+void* send_lsr_packet_thread(void* neighbor);
+int flooding_lsa(void* lsa_header_ptr, Interface* interface, bool is_origin, in_addr src);
 #endif

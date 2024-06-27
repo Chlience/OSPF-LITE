@@ -16,8 +16,7 @@ struct GlobalConfig {
 	uint32_t	hello_interval = 10;
 	uint32_t	dead_interval = 40;
 	uint32_t	wait_interval = 40;
-
-    OSPFArea*       area;
+    
 
     // Constructor
     GlobalConfig() {
