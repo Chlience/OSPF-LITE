@@ -19,8 +19,6 @@
 #include "link_state.h"
 
 extern GlobalConfig myconfigs;
-// extern std::vector<OSPFArea*> areas;
-// extern std::vector<Interface*> interfaces; 
 
 struct protoent *proto_ospf;
 
@@ -225,7 +223,11 @@ void* recv_ospf_packet_thread(void *inter) {
 	char* packet;
     struct iphdr *ip_header;
     struct in_addr src, dst;
+	
 	while (true) {
+		if (interface->state == InterfaceState::S_WAITING && interface->waiting_timeout == true) {
+			interface->event_wait_timer();
+		}
 		memset(frame, 0, 1514);
 		recv(socket_fd, frame, 1514, 0);
 		packet = frame + sizeof(struct ethhdr);
@@ -340,7 +342,7 @@ void* recv_ospf_packet_thread(void *inter) {
 				neighbor->event_1way_received();
 				continue;
 			}
-
+			
 			if (pre_pri != neighbor->pri && !new_neighbor) {
 				interface->event_neighbor_change();
 			} else if (neighbor->dr == neighbor->ip && neighbor->bdr == 0x00000000 && interface->state == InterfaceState::S_WAITING) {
@@ -398,6 +400,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					neighbor->is_master = true;
 					neighbor->dd_seq_num = seq_num;
 					neighbor->event_negotiation_done();
+					debugf("neighbor is master\n");
 				}
 				/* neighbor is slave，*/
 				else if (ospf_dd->b_I == 0 && ospf_dd->b_MS == 0
@@ -422,22 +425,26 @@ void* recv_ospf_packet_thread(void *inter) {
 				}
 				/* 选项不同 */
 				if (ospf_dd->options != neighbor->options) {
+					debugf("DD packet REJECT for options mismatch\n");
 					neighbor->event_seq_number_mismatch();
 					continue;
 				}
 				/* 意外设置了 I 位 */
 				if (ospf_dd->b_I == 1) {
+					debugf("DD packet REJECT for unexpected I bit\n");
 					neighbor->event_seq_number_mismatch();
 					continue;
 				}
 				/* MS 与主从关系不匹配或者 dd_seq_num 不匹配 */
 				if (neighbor->is_master) {
-					if (ospf_dd->b_MS == 0 || ospf_dd->dd_seq_num != neighbor->dd_seq_num + 1) {
+					if (ospf_dd->b_MS == 0 || seq_num != neighbor->dd_seq_num + 1) {
+						debugf("DD packet REJECT for MS or seq_num mismatch\n");
 						neighbor->event_seq_number_mismatch();
 						continue;
 					}
 				} else {
-					if (ospf_dd->b_MS == 1 || ospf_dd->dd_seq_num != neighbor->dd_seq_num) {
+					if (ospf_dd->b_MS == 1 || seq_num != neighbor->dd_seq_num) {
+						debugf("DD packet REJECT for MS or seq_num mismatch\n");
 						neighbor->event_seq_number_mismatch();
 						continue;
 					}
@@ -460,7 +467,10 @@ void* recv_ospf_packet_thread(void *inter) {
 			}
 			
 			/* 接收到一个序号匹配的 DD 包 */
-			LSAHeader* lsa_header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
+			if (neighbor->is_master) {
+				neighbor->dd_seq_num = seq_num;
+			}
+			LSAHeader* lsa_header 		= (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
 			LSAHeader* lsa_header_end	= (LSAHeader*)(packet + sizeof(iphdr) + ntohs(ospf_header->packet_length));
 			/* 检查 lsa_type */
 			for (; lsa_header != lsa_header_end; ++lsa_header) {
@@ -521,10 +531,10 @@ void* recv_ospf_packet_thread(void *inter) {
 			send_ospf_dd->interface_mtu = htons(neighbor->interface->mtu);
 			send_ospf_dd->options = 0x02;
 			send_ospf_dd->b_I = 0;
-
 			if (neighbor->is_master) {
 				send_ospf_dd->b_MS 			= 0;
-				send_ospf_dd->dd_seq_num 	= htons(neighbor->dd_seq_num);
+				send_ospf_dd->dd_seq_num 	= htonl(neighbor->dd_seq_num);
+
 				if (neighbor->last_send_dd_data_len != 0) {
 					int cnt = (neighbor->last_send_dd_data_len - sizeof(OSPFDD)) / sizeof(LSAHeader);
 					while (cnt) {

@@ -27,8 +27,6 @@ class OSPFArea {
 	std::vector<Interface*>		interfaces;
 
 	OSPFArea(uint32_t area_id):id(area_id) {}
-	
-	int add_network(uint32_t ip, uint32_t wildcard_mask);
 };
 
 

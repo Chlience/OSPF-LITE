@@ -4,6 +4,7 @@
 #include <list>
 #include <stdint.h>
 #include <set>
+#include <atomic>
 
 #include "neighbor.h"
 #include "area.h"
@@ -52,8 +53,11 @@ class Interface {
 	// Interface output cost
 	uint32_t			rxmt_interval	= 5;
 	uint32_t			au_type			= 0;
-
+	
     uint16_t    		mtu = 1500;
+
+	std::atomic<bool>	waiting_timeout	= false;
+	pthread_t			waiting_timer;
 
 	Interface() = default;
 	// ~Interface();
@@ -69,6 +73,7 @@ class Interface {
 	void event_unloop_ind();
 	void event_interface_down();
 	void call_election();
+	// void* waiting_timer(void*);
 };
 
 #endif

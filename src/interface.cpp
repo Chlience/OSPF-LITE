@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <unistd.h>
+
 #include "interface.h"
 #include "neighbor.h"
 #include "debug.h"
@@ -6,9 +8,15 @@
 
 extern GlobalConfig myconfigs;
 
+void* waiting_timer_thread(void *inter) {
+    Interface* interface = (Interface*)inter;
+    sleep(myconfigs.dead_interval);
+    interface->waiting_timeout = true;
+    pthread_exit(nullptr);
+}
+
 Neighbor* Interface::find_neighbor(uint32_t ip) {
     for (auto iter : neighbors) {
-        // debugf("find_neighbor: %s\n", ip2string(iter->ip));
         if (iter->ip == ip) {
             return iter;
         }
@@ -22,13 +30,14 @@ void Interface::add_neighbor(Neighbor* neighbor) {
 }
 
 void Interface::event_interface_up() {
-    printf("Interface %s event_interface_up", ip2string(ip_interface_address));
+    printf("[Interface] %s event_interface_up", ip2string(ip_interface_address));
     if (state == InterfaceState::S_DOWN) {
         if (type == NetworkType::T_P2P || type == NetworkType::T_P2MP || type == NetworkType::T_VIRTUAL) {
             printf(" from DOWN to POINT2POINT\n");
             state = InterfaceState::S_POINT2POINT;
         } else {
             if (router_priority != 0) {
+                pthread_create(&waiting_timer, nullptr, waiting_timer_thread, this);
                 printf(" from DOWN to WAITING\n");
                 state = InterfaceState::S_WAITING;
             } else {
@@ -40,54 +49,76 @@ void Interface::event_interface_up() {
 }
 
 void Interface::event_wait_timer() {
-    /* TODO */
+    if (state == InterfaceState::S_WAITING) {
+        call_election();
+        if (ip_interface_address == dr) {
+            printf("[Interface] %s event_wait_timer", ip2string(ip_interface_address));
+            printf(" from WAITING to DR\n");
+            state = InterfaceState::S_DR;
+        } else if (ip_interface_address == bdr) {
+            printf("[Interface] %s event_wait_timer", ip2string(ip_interface_address));
+            printf(" from WAITING to BACKUP\n");
+            state = InterfaceState::S_BACKUP;
+        }
+        else {
+            printf("[Interface] %s event_wait_timer", ip2string(ip_interface_address));
+            printf(" from WAITING to DROTHER\n");
+            state = InterfaceState::S_DROTHER;
+        }
+    } else {
+        printf("[Interface] %s event_wait_timer", ip2string(ip_interface_address));
+        printf(" REJCET\n");
+    }
 }
 
 void Interface::event_backup_seen() {
     if (state == InterfaceState::S_WAITING) {
         call_election();
         if (ip_interface_address == dr) {
-            printf("Interface %s event_backup_seen", ip2string(ip_interface_address));
+            printf("[Interface] %s event_backup_seen", ip2string(ip_interface_address));
             printf(" from WAITING to DR\n");
             state = InterfaceState::S_DR;
         } else if (ip_interface_address == bdr) {
-            printf("Interface %s event_backup_seen", ip2string(ip_interface_address));
+            printf("[Interface] %s event_backup_seen", ip2string(ip_interface_address));
             printf(" from WAITING to BACKUP\n");
             state = InterfaceState::S_BACKUP;
         }
         else {
-            printf("Interface %s event_backup_seen", ip2string(ip_interface_address));
+            printf("[Interface] %s event_backup_seen", ip2string(ip_interface_address));
             printf(" from WAITING to DROTHER\n");
             state = InterfaceState::S_DROTHER;
         }
+        pthread_cancel(waiting_timer);
+        pthread_join(waiting_timer, NULL);
+        waiting_timeout = false;
     } else {
-        printf("Interface %s event_backup_seen", ip2string(ip_interface_address));
+        printf("[Interface] %s event_backup_seen", ip2string(ip_interface_address));
         printf(" REJCET\n");
     }
 }
 
 void Interface::event_neighbor_change() {
-    // printf("Interface %s event_neighbor_change", ip2string(ip_interface_address));
+    // printf("[Interface] %s event_neighbor_change", ip2string(ip_interface_address));
     if (state == InterfaceState::S_DR
         || state == InterfaceState::S_BACKUP
         || state == InterfaceState::S_DROTHER) {
         call_election();
         if (ip_interface_address == dr) {
-            printf("Interface %s event_neighbor_change", ip2string(ip_interface_address));
+            printf("[Interface] %s event_neighbor_change", ip2string(ip_interface_address));
             printf(" from DR/BACKUP/DROTHER to DR\n");
             state = InterfaceState::S_DR;
         } else if (ip_interface_address == bdr) {
-            printf("Interface %s event_neighbor_change", ip2string(ip_interface_address));
+            printf("[Interface] %s event_neighbor_change", ip2string(ip_interface_address));
             printf(" from DR/BACKUP/DROTHER to BACKUP\n");
             state = InterfaceState::S_BACKUP;
         }
         else {
-            printf("Interface %s event_neighbor_change", ip2string(ip_interface_address));
+            printf("[Interface] %s event_neighbor_change", ip2string(ip_interface_address));
             printf(" from DR/BACKUP/DROTHER to DROTHER\n");
             state = InterfaceState::S_DROTHER;
         }
     } else {
-        printf("Interface %s event_neighbor_change", ip2string(ip_interface_address));
+        printf("[Interface] %s event_neighbor_change", ip2string(ip_interface_address));
         printf(" REJCET\n");
     }
 }

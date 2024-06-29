@@ -31,11 +31,11 @@ int main() {
 
 	Interface interface;
 	interfaces.push_back(&interface);
-	OSPFArea area = OSPFArea(0);
+
+	OSPFArea area = OSPFArea(ntohl(inet_addr("0.0.0.0")));
 	areas.push_back(&area);
 	
 	interface_init(&interface);
-	interface.event_interface_up();
 
 	OSPFNetwork network = OSPFNetwork(myconfigs.ip, ~myconfigs.ip_interface_mask);
 	area.networks.push_back(&network);
@@ -45,6 +45,13 @@ int main() {
 			inter->area = &area;
 		}
 	}
+
+	printf("interface info:\n");
+	printf("    ip addr: %s\n", ip2string(interface.ip_interface_address));
+	printf("    network mask: %s\n", ip2string(interface.ip_interface_mask));
+	printf("    area id %s\n", ip2string(interface.area->id));
+	
+	interface.event_interface_up();
 	
     pthread_t ospf_hello_sender;
     pthread_t ospf_reciver;

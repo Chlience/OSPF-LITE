@@ -5,7 +5,7 @@
 #include "ospf.h"
 
 void Neighbor::event_hello_received() {
-	printf("Neighbor %s event_hello_received", ip2string(ip));
+	printf("[Neighbor] %s event_hello_received", ip2string(ip));
 	if (state == NeighborState::S_DOWN) {
 		state = NeighborState::S_INIT;
 		printf(" from DOWN to INIT\n");
@@ -15,7 +15,7 @@ void Neighbor::event_hello_received() {
 }
 
 void Neighbor::event_2way_received() {
-	printf("Neighbor %s event_2way_received", ip2string(ip));
+	printf("[Neighbor] %s event_2way_received", ip2string(ip));
 	if (state == NeighborState::S_INIT) {
 		/* 决定是否与邻居建立连接 */
 		if (interface->type == NetworkType::T_P2P
@@ -41,7 +41,7 @@ void Neighbor::event_2way_received() {
 }
 
 void Neighbor::event_1way_received() {
-	printf("Neighbor %s event_1way_received", ip2string(ip));
+	printf("[Neighbor] %s event_1way_received", ip2string(ip));
 	if (state >= NeighborState::S_2WAY) {
 		printf(" from 2WAY or higher state to INIT\n");
 		state = NeighborState::S_INIT;
@@ -60,7 +60,7 @@ void Neighbor::event_1way_received() {
 }
 
 void Neighbor::event_adj_ok() {
-	printf("Neighbor %s event_adj_ok", ip2string(ip));
+	printf("[Neighbor] %s event_adj_ok", ip2string(ip));
 	if (state == NeighborState::S_2WAY) {
 		/* 决定是否与邻居建立连接 */
 		if (interface->type == NetworkType::T_P2P
@@ -109,7 +109,7 @@ void Neighbor::event_adj_ok() {
 }
 
 void Neighbor::event_negotiation_done() {
-	printf("Neighbor %s event_negotiation_done", ip2string(ip));
+	printf("[Neighbor] %s event_negotiation_done", ip2string(ip));
 	if (state == NeighborState::S_EXSTART) {
 		LSDB* lsdb = &interface->area->lsdb;
 		for (auto router_lsa: lsdb->router_lsas) {
@@ -126,7 +126,7 @@ void Neighbor::event_negotiation_done() {
 }
 
 void Neighbor::event_seq_number_mismatch() {
-	printf("Neighbor %s event_seq_number_mismatch", ip2string(ip));
+	printf("[Neighbor] %s event_seq_number_mismatch", ip2string(ip));
 	if (state >= NeighborState::S_EXCHANGE) {
 		state = NeighborState::S_EXSTART;
 
@@ -150,7 +150,7 @@ void Neighbor::event_seq_number_mismatch() {
 }
 
 void Neighbor::event_exchange_done() {
-	printf("Neighbor %s event_exchange_done", ip2string(ip));
+	printf("[Neighbor] %s event_exchange_done", ip2string(ip));
 	if (state == NeighborState::S_EXCHANGE) {
 		if (link_state_request_list.empty()) {
 			state = NeighborState::S_FULL;
@@ -167,7 +167,7 @@ void Neighbor::event_exchange_done() {
 }
 
 void Neighbor::event_loading_done() {
-	printf("Neighbor %s event_loading_done", ip2string(ip));
+	printf("[Neighbor] %s event_loading_done", ip2string(ip));
 	if (state == NeighborState::S_LOADING) {
 		state = NeighborState::S_FULL;
 		printf(" from LOADING to FULL\n");
@@ -177,6 +177,6 @@ void Neighbor::event_loading_done() {
 }
 
 void Neighbor::event_bad_ls_req() {
-	printf("Neighbor %s event_bad_ls_req", ip2string(ip));
+	printf("[Neighbor] %s event_bad_ls_req", ip2string(ip));
 	perror("Not implemented yet\n");
 }
