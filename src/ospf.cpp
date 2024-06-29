@@ -636,7 +636,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			/* 一种直接发向邻居，用于重传 flooding */
 			/* 一种直接发向邻居，用于同步邻居 */
 			/* 两者通过 dst.ip 和 state 进行区分 */
-			for (int i = 0; i < lsa_num; ++i, lsa_header_ptr += ntohl(lsa_header->length)) {
+			for (int i = 0; i < lsa_num; ++i, lsa_header_ptr += ntohs(lsa_header->length)) {
 				lsa_header = (LSAHeader*)lsa_header_ptr;
 				memcpy(lsa_header_host, LSAHeader::ntoh((LSAHeader*)lsa_header_ptr), sizeof(LSAHeader));
 				/* 1. 检查 LS CHECKSUM */
@@ -744,6 +744,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					}
 					continue;
 				}
+
 				/* 6. 如果发送邻居的链路状态请求列表上存在 LSA 实例，则数据库交换过程中发生错误 */
 				for (auto header: neighbor->link_state_request_list) {
 					if (header.link_state_id == lsa_header_host->link_state_id
@@ -797,6 +798,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					perror("No complement!\n");
 				}
 			}
+			debugf("sendLSAck\n");
 			size_t lsack_length = (char*)lsack_lsa_header - lsack_data;
 			if (!bad_ls_req && lsack_length > 0) {
 				send_ospf_packet(ntohl(src.s_addr), T_LSAck, lsack_data, (char*)lsack_lsa_header - lsack_data, interface);
