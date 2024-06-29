@@ -44,7 +44,6 @@ class Interface {
 	uint32_t			router_dead_interval	= 40;
 	uint32_t			inf_trans_delay			= 1;
 	uint32_t			router_priority			= 1;
-	uint8_t				ospf_options			= 0x2;
 	// Hello Timer
 	// Wait Timer
 	std::list<Neighbor*> neighbors;

@@ -285,7 +285,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			OSPFHello* ospf_hello = (OSPFHello*)(packet + sizeof(struct iphdr) + sizeof(OSPFHeader));
 
 			/* 检查选项参数是否匹配 */
-			if (ospf_hello->options != interface->ospf_options) {
+			if (ospf_hello->options != myconfigs.ospf_options) {
 				debugf("RecvPacket: Options mismatch\n");
 				continue;
 			}
@@ -379,6 +379,7 @@ void* recv_ospf_packet_thread(void *inter) {
                 neighbor->last_recv_dd_m 		= ospf_dd->b_M;
                 neighbor->last_recv_dd_ms 		= ospf_dd->b_MS;
             }
+			neighbor->options = ospf_dd->options;
 
 			DD_BEGIN:
 			if (neighbor->state == NeighborState::S_DOWN || neighbor->state == NeighborState::S_ATTEMPT) {
@@ -425,7 +426,9 @@ void* recv_ospf_packet_thread(void *inter) {
 					continue;
 				}
 				/* 选项不同 */
-				if (ospf_dd->options != neighbor->options) {
+				/* UPDATE：某些选项的不同是可以接受的，比方说 O 位 */
+				uint8_t options = OPTION_E | OPTION_NP;
+				if ((ospf_dd->options & options) != (neighbor->options & options)) {
 					debugf("DD packet REJECT for options mismatch\n");
 					neighbor->event_seq_number_mismatch();
 					continue;

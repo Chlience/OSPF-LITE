@@ -55,6 +55,14 @@ enum OSPFType: uint8_t {
     T_LSAck
 };
 
+#define OPTION_T    0b00000001
+#define OPTION_E    0b00000010
+#define OPTION_MC   0b00000100
+#define OPTION_NP   0b00001000
+#define OPTION_EA   0b00010000
+#define OPTION_DC   0b00100000
+#define OPTION_O    0b01000000
+
 int ospf_init();
 void send_ospf_packet(uint32_t dst_ip, const uint8_t ospf_type, const char* ospf_data, const size_t ospf_data_len);
 void* send_ospf_hello_packet_thread(void* interface);

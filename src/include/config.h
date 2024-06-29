@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <cstring>
 
+#include "ospf.h"
+
 struct GlobalConfig {
     const char* nic_name;
     uint32_t    ip;
@@ -14,6 +16,7 @@ struct GlobalConfig {
 	uint32_t	hello_interval = 10;
 	uint32_t	dead_interval = 40;
 	uint32_t	wait_interval = 40;
+    uint8_t     ospf_options = OPTION_E;
     // Constructor
     GlobalConfig() {
     }
