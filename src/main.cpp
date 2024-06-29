@@ -48,8 +48,6 @@ int main() {
 
 	printf("[config info]\n");
 	printf("	router id: %s\n", ip2string(myconfigs.router_id));
-	printf("\n");
-
 	printf("[interface info]\n");
 	printf("    ip addr: %s\n", ip2string(interface.ip_interface_address));
 	printf("    network mask: %s\n", ip2string(interface.ip_interface_mask));
