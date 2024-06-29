@@ -226,7 +226,6 @@ void* recv_ospf_packet_thread(void *inter) {
     struct in_addr src, dst;
 	
 	while (true) {
-		printf("RecvPacket: Waiting for packet\n");
 		if (interface->state == InterfaceState::S_WAITING && interface->waiting_timeout == true) {
 			interface->event_wait_timer();
 		}
@@ -422,7 +421,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					if (neighbor->is_master) {
 						send_ospf_packet(neighbor->ip, T_DD, neighbor->last_send_dd_data, neighbor->last_send_dd_data_len, interface);
 					} else {
-						debugf("DD packet IGNORE for receiving dumplicated packet. (S_EXSTART)\n");
+						debugf("DD packet IGNORE for receiving dumplicated packet. (S_EXCHANGE)\n");
 					}
 					continue;
 				}
@@ -458,9 +457,10 @@ void* recv_ospf_packet_thread(void *inter) {
 				/* 只可能接收重复包 */
 				if (is_dumplicated) {
 					if (neighbor->is_master) {
+						/* TODO 如果超时，则生成 seq_number_mismatch */
 						send_ospf_packet(neighbor->ip, T_DD, neighbor->last_send_dd_data, neighbor->last_send_dd_data_len, interface);
 					} else {
-						debugf("DD packet IGNORE for receiving dumplicated packet. (S_EXSTART)\n");
+						debugf("DD packet IGNORE for receiving dumplicated packet. (S_LOADING / S_FULL)\n");
 					}
 				} else {
 					debugf("DD packet IGNORE for not dumplicating packet. (S_LOADING)\n");
@@ -526,87 +526,48 @@ void* recv_ospf_packet_thread(void *inter) {
 			}
 			pthread_mutex_unlock(&neighbor->lsr_mutex);
 
+			/* 确认前一个数据包时，将已发送的 LSAHeader 从 database summary list 中删除 */
+			if (neighbor->last_send_dd_data_len != 0) {
+				int cnt = (neighbor->last_send_dd_data_len - sizeof(OSPFDD)) / sizeof(LSAHeader);
+				while (cnt) {
+					neighbor->database_summary_list.pop_front();
+					--cnt;
+				}
+			}
+
 			/* 发送一个 DD 包 */
+			if (ospf_dd->b_M == 0 && neighbor->database_summary_list.empty()) {
+				neighbor->event_exchange_done();
+			}
+
 			char* send_dd_data = (char*)malloc(1024);
 			uint32_t send_dd_data_len = sizeof(OSPFDD);
-
 			OSPFDD* send_ospf_dd = (OSPFDD*)send_dd_data;
-			memset(send_ospf_dd, 0, sizeof(OSPFDD));
-			
 			send_ospf_dd->interface_mtu = htons(neighbor->interface->mtu);
-			send_ospf_dd->options = 0x02;
-			send_ospf_dd->b_I = 0;
+			send_ospf_dd->options		= myconfigs.ospf_options;
+			send_ospf_dd->b_I			= 0;
 			if (neighbor->is_master) {
-				send_ospf_dd->b_MS 			= 0;
-				send_ospf_dd->dd_seq_num 	= htonl(neighbor->dd_seq_num);
-
-				if (neighbor->last_send_dd_data_len != 0) {
-					int cnt = (neighbor->last_send_dd_data_len - sizeof(OSPFDD)) / sizeof(LSAHeader);
-					while (cnt) {
-						neighbor->database_summary_list.pop_front();
-						--cnt;
-					}
-				}
-				send_ospf_dd->b_M = !neighbor->database_summary_list.empty();
-				LSAHeader* header = (LSAHeader*)(send_dd_data + sizeof(OSPFDD));
-				for (auto lsa_header: neighbor->database_summary_list) {
-					if (send_dd_data_len + sizeof(LSAHeader) > 1024) {
-						break;
-					}
-					header->ls_age 				= htons(lsa_header.ls_age);
-					header->options 			= lsa_header.options;
-					header->ls_type 			= lsa_header.ls_type;
-					header->link_state_id 		= htonl(lsa_header.link_state_id);
-					header->advertising_router 	= htonl(lsa_header.advertising_router);
-					header->ls_seq_num 			= htonl(lsa_header.ls_seq_num);
-					header->ls_checksum 		= htons(lsa_header.ls_checksum);
-					header->length 				= htons(lsa_header.length);
-					++header;
-					send_dd_data_len 			+= sizeof(LSAHeader);
-				}
-				send_ospf_packet(neighbor->ip, T_DD, send_dd_data, send_dd_data_len, interface);
-				memcpy(neighbor->last_send_dd_data, send_dd_data, send_dd_data_len);
-				neighbor->last_send_dd_data_len = send_dd_data_len;
-				if (ospf_dd->b_M == 0 && send_ospf_dd->b_M == 0) {
-					neighbor->event_exchange_done();
-				}
+				send_ospf_dd->b_MS = 0;
 			} else {
 				neighbor->dd_seq_num++;
 				send_ospf_dd->b_MS = 1;
-				send_ospf_dd->dd_seq_num = neighbor->dd_seq_num;
-				if (neighbor->last_send_dd_data_len != 0) {
-					int cnt = (neighbor->last_send_dd_data_len - sizeof(OSPFDD)) / sizeof(LSAHeader);
-					while (cnt) {
-						neighbor->database_summary_list.pop_front();
-						--cnt;
-					}
-				}
-				send_ospf_dd->b_M = !neighbor->database_summary_list.empty();
-				LSAHeader* header = (LSAHeader*)(send_dd_data + sizeof(OSPFDD));
-				for (auto lsa_header: neighbor->database_summary_list) {
-					if (send_dd_data_len + sizeof(LSAHeader) > 1024) {
-						break;
-					}
-					header->ls_age 				= htons(lsa_header.ls_age);
-					header->options 			= lsa_header.options;
-					header->ls_type 			= lsa_header.ls_type;
-					header->link_state_id 		= htonl(lsa_header.link_state_id);
-					header->advertising_router 	= htonl(lsa_header.advertising_router);
-					header->ls_seq_num 			= htonl(lsa_header.ls_seq_num);
-					header->ls_checksum 		= htons(lsa_header.ls_checksum);
-					header->length 				= htons(lsa_header.length);
-					++header;
-					send_dd_data_len 			+= sizeof(LSAHeader);
-				}
-				debugf("neibor M: %d, interface M: %d\n", ospf_dd->b_M, send_ospf_dd->b_M);
-				if (ospf_dd->b_M == 0 && send_ospf_dd->b_M == 0) {
-					neighbor->event_exchange_done();
-				} else {
-					send_ospf_packet(neighbor->ip, T_DD, send_dd_data, send_dd_data_len, interface);
-					memcpy(neighbor->last_send_dd_data, send_dd_data, send_dd_data_len);
-					neighbor->last_send_dd_data_len = send_dd_data_len;
-				}
 			}
+			send_ospf_dd->dd_seq_num = htonl(neighbor->dd_seq_num);
+			LSAHeader* header = (LSAHeader*)(send_dd_data + sizeof(OSPFDD));
+			bool more = false;
+			for (auto lsa_header: neighbor->database_summary_list) {
+				if (send_dd_data_len + sizeof(LSAHeader) > 1024) {
+					more = true;
+					break;
+				}
+				memcpy(header, LSAHeader::hton(&lsa_header), sizeof(LSAHeader));
+				++header;
+				send_dd_data_len += sizeof(LSAHeader);
+			}
+			send_ospf_dd->b_M = more;
+			send_ospf_packet(neighbor->ip, T_DD, send_dd_data, send_dd_data_len, interface);
+			memcpy(neighbor->last_send_dd_data, send_dd_data, send_dd_data_len);
+			neighbor->last_send_dd_data_len = send_dd_data_len;
 			free(send_dd_data);
 		} else if (ospf_header->type == T_LSR) {
 			/* DR 和 BDR 向多播地址 ALLSPFRouters 发送 LSU 和 LSAck */

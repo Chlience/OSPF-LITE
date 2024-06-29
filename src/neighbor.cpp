@@ -25,12 +25,19 @@ void Neighbor::event_2way_received() {
 		|| interface->bdr 	== interface->ip_interface_address
 		|| interface->dr 	== ip
 		|| interface->bdr	== ip) {
+			/* 重置 DD 状态 */
+			last_recv_dd_i = 0;
+			last_recv_dd_m = 0;
+			last_recv_dd_ms = 0;
+			last_recv_dd_seq_num = 0;
+			last_send_dd_data_len = 0;
 			dd_seq_num = 0;		// 指定一个 dd_seq_num
 			is_master = true; 	// 指是自己（不是 neighbor）为 master
 			state = NeighborState::S_EXSTART;
-			printf(" from INIT to EXSTART\n");
+			/* 开始发送空 DD 包 */
 			is_empty_dd_sender_running = true;
 			pthread_create(&empty_dd_sender, nullptr, send_empty_dd_packet_thread, (void*)this);
+			printf(" from INIT to EXSTART\n");
 		} else {
 			state = NeighborState::S_2WAY;
 			printf(" from INIT to 2WAY\n");
@@ -70,6 +77,12 @@ void Neighbor::event_adj_ok() {
 		|| interface->bdr 	== interface->ip_interface_address
 		|| interface->dr 	== this->ip
 		|| interface->bdr	== this->ip) {
+			/* 重置 DD 状态 */
+			last_recv_dd_i = 0;
+			last_recv_dd_m = 0;
+			last_recv_dd_ms = 0;
+			last_recv_dd_seq_num = 0;
+			last_send_dd_data_len = 0;
 			dd_seq_num = 0;		// 指定一个 dd_seq_num
 			is_master = true; 	// 指是自己（不是 neighbor）为 master
 			state = NeighborState::S_EXSTART;

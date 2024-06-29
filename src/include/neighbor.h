@@ -85,7 +85,7 @@ class Neighbor {
 	uint8_t			last_recv_dd_i : 1;
 	uint8_t			last_recv_dd_m : 1;
 	uint8_t			last_recv_dd_ms : 1;
-    uint8_t     	last_recv_dd_otjer : 5;
+    uint8_t     	last_recv_dd_other : 5;
 	
     char        	last_send_dd_data[1024];
     uint32_t    	last_send_dd_data_len;
