@@ -14,10 +14,10 @@ std::vector<Interface*> interfaces;
 std::vector<OSPFArea*> areas;
 
 void config_init() {
-	myconfigs.nic_name			= "eth0";	// 手动设定
+	myconfigs.nic_name			= "enp0s20f0u1c2";	// 手动设定
 	myconfigs.ip				= get_ip_address(myconfigs.nic_name);
 	myconfigs.ip_interface_mask	= get_network_mask(myconfigs.nic_name);
-	myconfigs.router_id 		= 0x08080808;	// 手动设定
+	myconfigs.router_id 		= ntohl(inet_addr("8.8.8.8"));	// 手动设定
 }
 
 void interface_init(Interface* interface) {
@@ -46,11 +46,15 @@ int main() {
 		}
 	}
 
-	printf("interface info:\n");
+	printf("[config info]\n");
+	printf("	router id: %s\n", ip2string(myconfigs.router_id));
+	printf("\n");
+
+	printf("[interface info]\n");
 	printf("    ip addr: %s\n", ip2string(interface.ip_interface_address));
 	printf("    network mask: %s\n", ip2string(interface.ip_interface_mask));
 	printf("    area id %s\n", ip2string(interface.area->id));
-	
+
 	interface.event_interface_up();
 	
     pthread_t ospf_hello_sender;

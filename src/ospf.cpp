@@ -25,8 +25,9 @@ struct protoent *proto_ospf;
 int ospf_init() {
 	proto_ospf = getprotobyname("ospf");
 	if (proto_ospf == NULL) {
-		perror("getprotobyname() failed");
-		return -1;
+		printf("getprotobyname() failed, use default value.\n");
+		proto_ospf = new protoent();
+		proto_ospf->p_proto = 89;
 	}
 	return 0;
 }
