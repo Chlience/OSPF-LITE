@@ -108,8 +108,11 @@ class Neighbor {
 	pthread_mutex_t lsr_mutex;
 	pthread_cond_t	lsr_cond;
 
+	pthread_t		retrans_sender;
+	pthread_mutex_t retrans_mutex;
+
 	bool operator < (const Neighbor& other) const {
-        return ip < other.ip; // 考虑要不要用 id 作为键
+        return ip < other.ip;
     }
 
 	Neighbor(uint32_t ip):ip(ip) {
@@ -128,6 +131,7 @@ class Neighbor {
 		is_empty_dd_sender_running = false;
 		lsr_mutex		= PTHREAD_MUTEX_INITIALIZER;
 		lsr_cond		= PTHREAD_COND_INITIALIZER;
+		retrans_mutex	= PTHREAD_MUTEX_INITIALIZER;
 	}
 
 	void event_hello_received();

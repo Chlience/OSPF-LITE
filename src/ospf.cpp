@@ -495,7 +495,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			LSDB* lsdb = &interface->area->lsdb;
 			lsa_header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
 			pthread_mutex_lock(&neighbor->lsr_mutex);
-			pthread_mutex_lock(&lsdb->lsa_mutex);
+			// pthread_mutex_lock(&lsdb->lsa_mutex);
 			for (; lsa_header != lsa_header_end; ++lsa_header) {
 				LSAHeader header;
 				header.ls_age 				= ntohs(lsa_header->ls_age);
@@ -529,7 +529,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					continue;
 				}
 			}
-			pthread_mutex_unlock(&lsdb->lsa_mutex);
+			// pthread_mutex_unlock(&lsdb->lsa_mutex);
 			pthread_mutex_unlock(&neighbor->lsr_mutex);
 
 			/* 确认前一个数据包时，将已发送的 LSAHeader 从 database summary list 中删除 */
@@ -593,7 +593,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			bool bad_ls_req = false;
 			char* lsu_data = (char*)malloc(1024);
 			char* lsa = lsu_data;
-			pthread_mutex_lock(&lsdb->lsa_mutex);
+			// pthread_mutex_lock(&lsdb->lsa_mutex);
 			for (; ospf_lsr != ospf_lsr_end; ++ospf_lsr) {
 				uint32_t ls_type = ntohl(ospf_lsr->ls_type);
 				uint32_t link_state_id = ntohl(ospf_lsr->link_state_id);
@@ -648,7 +648,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					perror("LSR: lsa type no complement!");
 				}
 			}
-			pthread_mutex_unlock(&lsdb->lsa_mutex);
+			// pthread_mutex_unlock(&lsdb->lsa_mutex);
 			if (bad_ls_req) {
 				free(lsu_data);
 				continue;
@@ -678,7 +678,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			/* 一种直接发向邻居，用于重传 flooding */
 			/* 一种直接发向邻居，用于同步邻居 */
 			/* 两者通过 dst.ip 和 state 进行区分 */
-			pthread_mutex_lock(&lsdb->lsa_mutex);
+			// pthread_mutex_lock(&lsdb->lsa_mutex);
 			for (int i = 0; i < lsa_num; ++i, lsa_header_ptr += ntohs(lsa_header->length)) {
 				lsa_header = (LSAHeader*)lsa_header_ptr;
 				memcpy(lsa_header_host, LSAHeader::ntoh((LSAHeader*)lsa_header_ptr), sizeof(LSAHeader));
@@ -847,7 +847,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					perror("No complement!\n");
 				}
 			}
-			pthread_mutex_unlock(&lsdb->lsa_mutex);
+			// pthread_mutex_unlock(&lsdb->lsa_mutex);
 			size_t lsack_length = (char*)lsack_lsa_header - lsack_data;
 			if (!bad_ls_req && lsack_length > 0) {
 				if (interface->state == InterfaceState::S_DR || interface->state == InterfaceState::S_BACKUP) {
@@ -858,7 +858,29 @@ void* recv_ospf_packet_thread(void *inter) {
 			}
 			delete lsa_header_host;
 		} else if (ospf_header->type == T_LSAck) {
-			debugf(" LSAck packet <TODO>\n");
+			Neighbor* neighbor = interface->find_neighbor(ntohl(src.s_addr));
+			assert(neighbor != nullptr);
+
+			if (neighbor->state < NeighborState::S_EXCHANGE) {
+				debugf(" LSAck packet REJECT for neighbor state\n");
+				continue;
+			}
+
+			LSAHeader* lsa_header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader));
+			LSAHeader* lsa_header_end = (LSAHeader*)(packet + sizeof(iphdr) + ntohs(ospf_header->packet_length));
+			for (; lsa_header != lsa_header_end; ++lsa_header) {
+				auto lsa_save = std::find_if(neighbor->link_state_retransmission_list.begin(), neighbor->link_state_retransmission_list.end(), [lsa_header](LSAHeader& lsa) {
+					return lsa.ls_type == lsa_header->ls_type
+						&& lsa.link_state_id == ntohl(lsa_header->link_state_id)
+						&& lsa.advertising_router == ntohl(lsa_header->advertising_router);
+				});
+				if (lsa_save == neighbor->link_state_retransmission_list.end()) {
+					debugf(" LSAck packet REJECT for not found in retransmission list\n");
+				} else {
+					neighbor->link_state_retransmission_list.erase(lsa_save);
+					debugf(" LSAck packet: remove from retransmission list\n");
+				}
+			}
 		} else {
 			debugf(" Unsupport packet\n");
 		}
@@ -942,6 +964,68 @@ void *send_lsr_packet_thread(void* neigh) {
 	}
 	free(data);
 	return nullptr;
+}
+
+void* retrans_sender_thread(void* neigh) {
+	Neighbor* neighbor = (Neighbor*)neigh;
+	char* data = (char*)malloc(1024);
+	LSDB* lsdb = &neighbor->interface->area->lsdb;
+	while (true) {
+		sleep(neighbor->interface->rxmt_interval);
+		char* ptr = (char*)data;
+		OSPFLsu* lsu = (OSPFLsu*)ptr;
+		lsu->num = 0;
+		ptr += sizeof(OSPFLsu);
+		pthread_mutex_lock(&neighbor->retrans_mutex);
+		for (auto lsa_header: neighbor->link_state_retransmission_list) {
+			if (ptr - data + lsa_header.length > 1024) { break; }
+			lsu->num = htonl(ntohl(lsu->num) + 1);
+			if (lsa_header.ls_type == LSA_ROUTER) {
+				LSARouter* lsa_router = lsdb->find_router_lsa(lsa_header.link_state_id, lsa_header.advertising_router);
+				LSARouter* lsa_router_net = (LSARouter*)ptr;
+				memcpy(&lsa_router_net->header, &lsa_router->header, sizeof(LSAHeader));
+				lsa_router_net->header.ls_age = htons(lsa_router->header.ls_age + neighbor->interface->inf_trans_delay);
+				lsa_router_net->zero0 = lsa_router->zero0;
+				lsa_router_net->b_v = lsa_router->b_v;
+				lsa_router_net->b_e = lsa_router->b_e;
+				lsa_router_net->b_b = lsa_router->b_b;
+				lsa_router_net->zero1 = lsa_router->zero1;
+				lsa_router_net->links_num = htons(lsa_router->links_num);
+				ptr += sizeof(LSAHeader) + sizeof(uint8_t) * 2 + sizeof(uint16_t);
+				for (auto link: lsa_router->links) {
+					LSARouterLink* router_link = (LSARouterLink*)ptr;
+					router_link->link_id = htonl(link.link_id);
+					router_link->link_data = htonl(link.link_data);
+					router_link->type = link.type;
+					router_link->tos_num = link.tos_num;
+					router_link->metric = htons(link.metric);
+					if (link.tos_num != 0) {
+						perror("TODO: TOS\n");
+					}
+					ptr += sizeof(LSARouterLink);
+				}
+			} else if (lsa_header.ls_type == LSA_NETWORK) {
+				if (ptr - data >= 900) { break; }
+				LSANetwork* lsa_network = lsdb->find_network_lsa(lsa_header.link_state_id, lsa_header.advertising_router);
+				LSANetwork* lsa_router_net = (LSANetwork*)ptr;
+				memcpy(&lsa_router_net->header, &lsa_network->header, sizeof(LSAHeader));
+				lsa_router_net->header.ls_age = htons(lsa_network->header.ls_age + neighbor->interface->inf_trans_delay);
+				ptr += sizeof(LSAHeader);
+				lsa_router_net->network_mask = htonl(lsa_network->network_mask);
+				ptr += sizeof(uint32_t);
+				for (auto attach_router: lsa_network->attached_routers) {
+					*(uint32_t*)ptr = htonl(attach_router);
+					ptr += sizeof(uint32_t);
+				}
+			} else {
+				perror("Unsupport LSA type\n");
+			}
+			send_ospf_packet(neighbor->ip, T_LSU, data, ptr - data, neighbor->interface);
+		}
+		pthread_mutex_unlock(&neighbor->retrans_mutex);
+	}
+	free(data);
+	pthread_exit(NULL);
 }
 
 int flooding_lsa(void* lsa_header_ptr, Interface* interface, bool is_origin, in_addr src) {

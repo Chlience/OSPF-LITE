@@ -98,7 +98,7 @@ void update_lsas(Interface* interface) {
 	lsu->num = 0;
 	char* ptr = data + sizeof(OSPFLsu);
 	LSDB* lsdb = &interface->area->lsdb;
-	pthread_mutex_lock(&lsdb->lsa_mutex);
+	// pthread_mutex_lock(&lsdb->lsa_mutex);
 
 	if (interface->state == InterfaceState::S_DR) {
 		LSANetwork* network_lsa = generate_network_lsa(interface);
@@ -114,6 +114,11 @@ void update_lsas(Interface* interface) {
 			is_flooding = false;
 		}
 		if (is_flooding) {
+			for (auto neighbor : interface->neighbors) {
+				if (neighbor->state == NeighborState::S_FULL) {
+					neighbor->link_state_retransmission_list.push_back(network_lsa->header);
+				}
+			}
 			lsu->num = htonl(ntohl(lsu->num) + 1);
 			LSAHeader* lsa_header = (LSAHeader*) ptr;
 			memcpy(lsa_header, LSAHeader::hton(&network_lsa->header), sizeof(LSAHeader));
@@ -125,6 +130,7 @@ void update_lsas(Interface* interface) {
 				ptr += sizeof(uint32_t);
 			}
 			lsa_header->ls_checksum = htons(lsa_checksum(lsa_header, ntohs(lsa_header->length)));
+			lsa_header->ls_age = htons(ntohs(lsa_header->ls_age) + interface->inf_trans_delay);
 		}
 		delete network_lsa;
 	}
@@ -138,11 +144,17 @@ void update_lsas(Interface* interface) {
 			is_flooding = true;
 		} else if (lsa_header_cmp((LSAHeader*)router_lsa, (LSAHeader*)router_lsa_old) < 0) {
 			lsdb->remove_router_lsa(router_lsa->header.link_state_id, router_lsa->header.advertising_router);
+			lsdb->router_lsas.push_back(router_lsa);
 			is_flooding = true;
 		} else {
 			is_flooding = false;
 		}
 		if (is_flooding) {
+			for (auto neighbor : interface->neighbors) {
+				if (neighbor->state == NeighborState::S_FULL) {
+					neighbor->link_state_retransmission_list.push_back(router_lsa->header);
+				}
+			}
 			lsu->num = htonl(ntohl(lsu->num) + 1);
 			LSARouter* router_lsa_net = (LSARouter*)ptr;
 			memcpy((LSAHeader*)router_lsa_net, LSAHeader::hton(&router_lsa->header), sizeof(LSAHeader));
@@ -166,10 +178,11 @@ void update_lsas(Interface* interface) {
 				ptr += sizeof(LSARouterLink);
 			}
 			router_lsa_net->header.ls_checksum = htons(lsa_checksum((LSAHeader*)router_lsa_net, ntohs(router_lsa_net->header.length)));
+			router_lsa_net->header.ls_age = htons(ntohs(router_lsa_net->header.ls_age) + interface->inf_trans_delay);
 		}
 		delete router_lsa;
 	}
-	pthread_mutex_unlock(&lsdb->lsa_mutex);
+	// pthread_mutex_unlock(&lsdb->lsa_mutex);
 	
 	if (lsu->num != 0) {
 		if (interface->state == InterfaceState::S_DR || interface->state == InterfaceState::S_BACKUP) {

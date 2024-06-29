@@ -9,6 +9,7 @@ void Neighbor::event_hello_received() {
 	printf("[Neighbor] %s event_hello_received", ip2string(ip));
 	if (state == NeighborState::S_DOWN) {
 		state = NeighborState::S_INIT;
+		pthread_create(&retrans_sender, nullptr, retrans_sender_thread, (void*)this);
 		printf(" from DOWN to INIT\n");
 	} else {
 		printf(" reset clock\n");
@@ -53,7 +54,9 @@ void Neighbor::event_1way_received() {
 	if (state >= NeighborState::S_2WAY) {
 		printf(" from 2WAY or higher state to INIT\n");
 		state = NeighborState::S_INIT;
+		pthread_mutex_lock(&retrans_mutex);
 		link_state_retransmission_list.clear();
+		pthread_mutex_unlock(&retrans_mutex);
 		database_summary_list.clear();
 		pthread_mutex_lock(&lsr_mutex);
 		link_state_request_list.clear();
@@ -143,8 +146,9 @@ void Neighbor::event_seq_number_mismatch() {
 	printf("[Neighbor] %s event_seq_number_mismatch", ip2string(ip));
 	if (state >= NeighborState::S_EXCHANGE) {
 		state = NeighborState::S_EXSTART;
-
+		pthread_mutex_lock(&retrans_mutex);
 		link_state_retransmission_list.clear();
+		pthread_mutex_unlock(&retrans_mutex);
 		database_summary_list.clear();
 		pthread_mutex_lock(&lsr_mutex);
 		link_state_request_list.clear();
@@ -197,8 +201,9 @@ void Neighbor::event_bad_ls_req() {
 	/* 和 seq_number_mismatch 完全一致 */
 	if (state >= NeighborState::S_EXCHANGE) {
 		state = NeighborState::S_EXSTART;
-
+		pthread_mutex_lock(&retrans_mutex);
 		link_state_retransmission_list.clear();
+		pthread_mutex_unlock(&retrans_mutex);
 		database_summary_list.clear();
 		pthread_mutex_lock(&lsr_mutex);
 		link_state_request_list.clear();

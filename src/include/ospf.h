@@ -69,5 +69,6 @@ void* send_ospf_hello_packet_thread(void* interface);
 void* recv_ospf_packet_thread(void* interface);
 void* send_empty_dd_packet_thread(void* neighbor);
 void* send_lsr_packet_thread(void* neighbor);
+void* retrans_sender_thread(void* neighbor);
 int flooding_lsa(void* lsa_header_ptr, Interface* interface, bool is_origin, in_addr src);
 #endif

@@ -208,7 +208,7 @@ uint16_t fletcher16_ru(const void* data, size_t len, int checksum_offset) {
 }
 
 uint16_t lsa_checksum(const LSAHeader* lsa_header, const uint16_t length) {
-	debugf("lsa_checksum: length = %d\n", length);
+	// debugf("lsa_checksum: length = %d\n", length);
 	void *p = malloc(length);
 	memcpy(p, lsa_header, length);
 	LSAHeader* lsa_header_copy = (LSAHeader*)p;
@@ -228,7 +228,7 @@ void* lsdb_aging_thread(void *data) {
 		sleep(1);
 		OSPFArea* area = (OSPFArea*)data;
 		LSDB* lsdb = &area->lsdb;
-		pthread_mutex_lock(&lsdb->lsa_mutex);
+		// pthread_mutex_lock(&lsdb->lsa_mutex);
 		for (auto it : lsdb->router_lsas) {
 			if (it->header.ls_age < 0xff) {
 				it->header.ls_age++;
@@ -239,7 +239,7 @@ void* lsdb_aging_thread(void *data) {
 				it->header.ls_age++;
 			}
 		}
-		pthread_mutex_unlock(&lsdb->lsa_mutex);
+		// pthread_mutex_unlock(&lsdb->lsa_mutex);
 	}
 	pthread_exit(NULL);
 }
