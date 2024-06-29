@@ -226,6 +226,7 @@ void* recv_ospf_packet_thread(void *inter) {
     struct in_addr src, dst;
 	
 	while (true) {
+		printf("RecvPacket: Waiting for packet\n");
 		if (interface->state == InterfaceState::S_WAITING && interface->waiting_timeout == true) {
 			interface->event_wait_timer();
 		}
@@ -687,7 +688,7 @@ void* recv_ospf_packet_thread(void *inter) {
 						LSANetwork* tmp = (LSANetwork*)lsdb_lsa;
 						lsa_exist = true;
 						lsa_cmp_result = lsa_header_cmp(lsa_header_host, &tmp->header);
-						perror("No complement!\n");
+						lsa_self = tmp->header.advertising_router == htonl(myconfigs.router_id);
 					}
 				} else {
 					perror("No complement!\n");
@@ -719,10 +720,9 @@ void* recv_ospf_packet_thread(void *inter) {
 					}
 					/* d 在链接状态数据库中安装新 LSA */
 					if (lsa_header_host->ls_type == LSA_ROUTER) {
-						lsdb->install_lsa_router((LSAHeader*)lsa_header_ptr);
+						lsdb->install_router_lsa((LSAHeader*)lsa_header_ptr);
 					} else if (lsa_header_host->ls_type == LSA_NETWORK) {
-						// lsdb->install_lsa_network((LSAHeader*)lsa_header_ptr);
-						perror("TODO: install_lsa_network\n");
+						lsdb->install_network_lsa((LSARouter*)lsa_header_ptr);
 					}
 					/* e 可能通过向接收接口发回链路状态确认包来确认 LSA 的接收 */
 					/* 13.5 如果向原接口泛洪，则不发送确认 */
@@ -773,19 +773,26 @@ void* recv_ospf_packet_thread(void *inter) {
 						perror("TODO: delay ack\n");
 					}
 				}
-				/* 8 此时数据库副本较近 */
+				/* 8 此时数据库副本较新 */
 				if (lsa_header_host->ls_type == LSA_ROUTER) {
 					LSARouter* lsa_router = (LSARouter*)lsdb_lsa;
 					if (lsa_router->header.ls_age == MAX_AGE && lsa_router->header.ls_seq_num == MAX_SEQUENCE_NUMBER) {
 						continue;
 					} else {
 						// 发送一个 LSU 包给邻居
-						perror("send a newer LSU");
+						perror("[TODO] send a newer LSU");
 						continue;
 					}
 				} else if (lsa_header_host->ls_type == LSA_NETWORK) {
-					// lsdb->install_lsa_network((LSAHeader*)lsa_header_ptr);
-					perror("TODO: install_lsa_network\n");
+					lsdb->install_network_lsa((LSAHeader*)lsa_header_ptr);
+					LSANetwork* lsa_network = (LSANetwork*)lsdb_lsa;
+					if (lsa_network->header.ls_age == MAX_AGE && lsa_network->header.ls_seq_num == MAX_SEQUENCE_NUMBER) {
+						continue;
+					} else {
+						// 发送一个 LSU 包给邻居
+						perror("[TODO] send a newer LSU");
+						continue;
+					}
 				} else {
 					perror("No complement!\n");
 				}

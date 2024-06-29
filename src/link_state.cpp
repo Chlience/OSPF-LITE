@@ -14,6 +14,8 @@ LSAHeader* LSAHeader::ntoh(const LSAHeader* netHeader) {
 	hostHeader.link_state_id = ntohl(netHeader->link_state_id);
 	hostHeader.advertising_router = ntohl(netHeader->advertising_router);
 	hostHeader.ls_seq_num = ntohl(netHeader->ls_seq_num);
+	hostHeader.ls_checksum = ntohs(netHeader->ls_checksum);
+	hostHeader.length = ntohs(netHeader->length);
 	return &hostHeader;
 }
 
@@ -65,7 +67,7 @@ LSANetwork* LSDB::find_network_lsa(uint32_t link_state_id, uint32_t advertising_
 	}
 }
 
-void LSDB::install_lsa_router(void* data) {
+void LSDB::install_router_lsa(void* data) {
 	LSAHeader* lsa_header_host = new LSAHeader(*LSAHeader::ntoh((LSAHeader*)data));
 	/* 删除旧 LSA */
 	auto it = std::find_if(router_lsas.begin(), router_lsas.end(), [lsa_header_host](LSARouter* lsa) {
@@ -83,18 +85,45 @@ void LSDB::install_lsa_router(void* data) {
 	lsa_router_host->b_b		= lsa_router_net->b_b;
 	lsa_router_host->zero1	= 0;
 	lsa_router_host->links_num = ntohs(lsa_router_net->links_num);
-	for (auto link_net : lsa_router_host->links) {
+	LSARouterLink* link_net = (LSARouterLink*)((char*)data + sizeof(LSAHeader) + sizeof(LSARouter));
+	for (int i = 0; i < lsa_router_host->links_num; ++i) {
 		LSARouterLink link;
-		link.link_id	= ntohl(link_net.link_id);
-		link.link_data	= ntohl(link_net.link_data);
-		link.type		= link_net.type;
-		link.tos_num	= link_net.tos_num;
-		link.metric		= ntohs(link_net.metric);
+		link.link_id	= ntohl(link_net->link_id);
+		link.link_data	= ntohl(link_net->link_data);
+		link.type		= link_net->type;
+		link.tos_num	= link_net->tos_num;
+		link.metric		= ntohs(link_net->metric);
 		lsa_router_host->links.push_back(link);
+		if (link.tos_num != 0) {
+			perror("TOS not zero\n");
+		}
+		++link_net;
 	}
-	router_lsas.push_back(lsa_router_host);
-	delete lsa_header_host;
 	delete lsa_router_host;
+	delete lsa_header_host;
+}
+
+void LSDB::install_network_lsa(void *data) {
+	LSANetwork* lsa_network_net = (LSANetwork*)data;
+	LSANetwork* lsa_network_host = new LSANetwork;
+	lsa_network_host->header = *LSAHeader::ntoh(&lsa_network_net->header);
+
+	/* 删除旧 LSA */
+	auto it = std::find_if(network_lsas.begin(), network_lsas.end(), [lsa_network_host](LSANetwork* lsa) {
+		return lsa->header.link_state_id == lsa_network_host->header.link_state_id && lsa->header.advertising_router == lsa_network_host->header.advertising_router; });
+	if (it != network_lsas.end()) {
+		network_lsas.erase(it);
+	}
+	/* 插入新 LSA */
+	uint32_t* network_router = (uint32_t*)((char *)data + sizeof(LSAHeader) + sizeof(uint32_t));
+	uint32_t* network_router_end = (uint32_t*)((char *)data + lsa_network_host->header.length);
+	for (; network_router != network_router_end; ++network_router) {
+		uint32_t network_router_host;
+		network_router_host = ntohl(*network_router);
+		lsa_network_host->attached_routers.push_back(network_router_host);
+	}
+	network_lsas.push_back(lsa_network_host);
+	delete lsa_network_host;
 }
 
 uint16_t fletcher16(const uint8_t* data, size_t len) { // form wikipedia

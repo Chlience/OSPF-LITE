@@ -54,6 +54,8 @@ struct LSARouter {
 
 struct LSANetwork {
 	LSAHeader	header;
+	uint32_t	network_mask;
+	std::vector<uint32_t> attached_routers;
 };
 
 class LSDB {
@@ -62,7 +64,8 @@ class LSDB {
 	std::vector<LSANetwork*> network_lsas;
 	LSARouter* find_router_lsa(uint32_t link_state_id, uint32_t advertising_router);
 	LSANetwork* find_network_lsa(uint32_t link_state_id, uint32_t advertising_router);
-	void install_lsa_router(void *data);
+	void install_router_lsa(void *data);
+	void install_network_lsa(void *data);
 };
 
 
