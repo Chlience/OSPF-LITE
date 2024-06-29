@@ -37,6 +37,14 @@ struct OSPFDD {
     uint32_t    dd_seq_num;
 };  // 8 bytes
 
+enum OSPFType: uint8_t {
+    T_HELLO = 1,
+    T_DD,
+    T_LSR,
+    T_LSU,
+    T_LSAck
+};
+
 struct OSPFLsr { // 事实上是 LSR 中的一项
     uint32_t    ls_type;
     uint32_t    link_state_id;
@@ -45,14 +53,6 @@ struct OSPFLsr { // 事实上是 LSR 中的一项
 
 struct OSPFLsu {
     uint32_t    num;
-};
-
-enum OSPFType: uint8_t {
-    T_HELLO = 1,
-    T_DD,
-    T_LSR,
-    T_LSU,
-    T_LSAck
 };
 
 #define OPTION_T    0b00000001
@@ -64,7 +64,7 @@ enum OSPFType: uint8_t {
 #define OPTION_O    0b01000000
 
 int ospf_init();
-void send_ospf_packet(uint32_t dst_ip, const uint8_t ospf_type, const char* ospf_data, const size_t ospf_data_len);
+void send_ospf_packet(uint32_t dst_ip, const uint8_t ospf_type, const char* ospf_data, const size_t ospf_data_len, Interface* interface);
 void* send_ospf_hello_packet_thread(void* interface);
 void* recv_ospf_packet_thread(void* interface);
 void* send_empty_dd_packet_thread(void* neighbor);

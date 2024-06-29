@@ -18,7 +18,7 @@
 #include "debug.h"
 #include "link_state.h"
 
-extern GlobalConfig myconfigs;
+extern GlobalConfig myconfig;
 
 struct protoent *proto_ospf;
 
@@ -82,7 +82,7 @@ void send_ospf_packet(uint32_t dst_ip,
 	/* 后续是不是改为使用 interface 的 ip */
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
-	strcpy(ifr.ifr_name, myconfigs.nic_name);
+	strcpy(ifr.ifr_name, myconfig.nic_name);
     if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) < 0) {
         perror("SendPacket: setsockopt");
     }
@@ -95,7 +95,7 @@ void send_ospf_packet(uint32_t dst_ip,
     ospf_header->version		= 2;
     ospf_header->type 			= ospf_type;
     ospf_header->packet_length 	= htons(ospf_len);
-    ospf_header->router_id 		= htonl(myconfigs.router_id);
+    ospf_header->router_id 		= htonl(myconfig.router_id);
     ospf_header->area_id   		= htonl(interface->area->id);
     ospf_header->checksum 		= 0;
     ospf_header->autype 		= interface->au_type;
@@ -142,7 +142,7 @@ void* send_ospf_hello_packet_thread(void* inter) {
 	/* 在此处只需要使用 ifreq 的 ifr_name */
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
-	strcpy(ifr.ifr_name, myconfigs.nic_name);
+	strcpy(ifr.ifr_name, myconfig.nic_name);
     if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) < 0) {
         perror("SendHelloPacket: setsockopt");
     }
@@ -164,7 +164,7 @@ void* send_ospf_hello_packet_thread(void* inter) {
 		ospf_header->version		= 2;
 		ospf_header->type 			= 1;
 		ospf_header->packet_length 	= htons(ospf_len);
-		ospf_header->router_id 		= htonl(myconfigs.router_id);
+		ospf_header->router_id 		= htonl(myconfig.router_id);
 		ospf_header->area_id   		= htonl(interface->area->id);
 		ospf_header->checksum 		= 0;
 		ospf_header->autype 		= interface->au_type;
@@ -179,10 +179,10 @@ void* send_ospf_hello_packet_thread(void* inter) {
 
 		OSPFHello* ospf_hello = (OSPFHello*)(ospf_packet + sizeof(OSPFHeader)); 
         ospf_hello->ip_interface_mask				= htonl(interface->ip_interface_mask);	// 对应接口的 ip_interface_mask
-        ospf_hello->hello_interval				= htons(myconfigs.hello_interval);
+        ospf_hello->hello_interval				= htons(myconfig.hello_interval);
         ospf_hello->options						= 0x02;
         ospf_hello->rtr_pri						= 1;
-        ospf_hello->router_dead_interval		= htonl(myconfigs.dead_interval);
+        ospf_hello->router_dead_interval		= htonl(myconfig.dead_interval);
         ospf_hello->designated_router			= htonl(interface->dr);
         ospf_hello->backup_designated_router	= htonl(interface->bdr);
 
@@ -202,7 +202,7 @@ void* send_ospf_hello_packet_thread(void* inter) {
 		else {
 			debugf("SendHelloPacket: send success\n");
 		}
-        sleep(myconfigs.hello_interval);
+        sleep(myconfig.hello_interval);
 	}
 	free(ospf_packet);
 }
@@ -215,7 +215,7 @@ void* recv_ospf_packet_thread(void *inter) {
     }
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
-	strcpy(ifr.ifr_name, myconfigs.nic_name);
+	strcpy(ifr.ifr_name, myconfig.nic_name);
     if (setsockopt(socket_fd, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) < 0) {
         perror("RecvPacket: setsockopt");
     }
@@ -285,7 +285,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			OSPFHello* ospf_hello = (OSPFHello*)(packet + sizeof(struct iphdr) + sizeof(OSPFHeader));
 
 			/* 检查选项参数是否匹配 */
-			if (ospf_hello->options != myconfigs.ospf_options) {
+			if (ospf_hello->options != myconfig.ospf_options) {
 				debugf("RecvPacket: Options mismatch\n");
 				continue;
 			}
@@ -332,7 +332,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			uint32_t* ospf_end 				= (uint32_t*)(packet + sizeof(struct iphdr) + ntohs(ospf_header->packet_length));
             bool b_2way = false;
 			for (;ospf_hello_neighbor != ospf_end; ++ospf_hello_neighbor) {
-				if (*ospf_hello_neighbor == htonl(myconfigs.router_id)) {
+				if (*ospf_hello_neighbor == htonl(myconfig.router_id)) {
 					b_2way = true;
 					break;
 				}
@@ -398,7 +398,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			} else if (neighbor->state == NeighborState::S_EXSTART) {
 				/* neighbor is master */
 				if (ospf_dd->b_I == 1 && ospf_dd->b_M == 1 && ospf_dd->b_MS == 1
-				&& neighbor->id > myconfigs.router_id) {
+				&& neighbor->id > myconfig.router_id) {
 					neighbor->is_master = true;
 					neighbor->dd_seq_num = seq_num;
 					neighbor->event_negotiation_done();
@@ -407,7 +407,7 @@ void* recv_ospf_packet_thread(void *inter) {
 				/* neighbor is slave，*/
 				else if (ospf_dd->b_I == 0 && ospf_dd->b_MS == 0
 				&& seq_num == neighbor->dd_seq_num
-				&& neighbor->id < myconfigs.router_id) {
+				&& neighbor->id < myconfig.router_id) {
 					neighbor->is_master = false;
 					neighbor->event_negotiation_done();
 				}
@@ -544,7 +544,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			uint32_t send_dd_data_len = sizeof(OSPFDD);
 			OSPFDD* send_ospf_dd = (OSPFDD*)send_dd_data;
 			send_ospf_dd->interface_mtu = htons(neighbor->interface->mtu);
-			send_ospf_dd->options		= myconfigs.ospf_options;
+			send_ospf_dd->options		= myconfig.ospf_options;
 			send_ospf_dd->b_I			= 0;
 			if (neighbor->is_master) {
 				send_ospf_dd->b_MS = 0;
@@ -593,15 +593,22 @@ void* recv_ospf_packet_thread(void *inter) {
 				uint32_t advertising_router = ntohl(ospf_lsr->advertising_router);
 
 				if (ls_type == LSA_ROUTER) {
-					LSARouter* lsa_router = lsdb->find_router_lsa(link_state_id, advertising_router);
-					if (lsa_router == nullptr) {
+					LSARouter* router_lsa = lsdb->find_router_lsa(link_state_id, advertising_router);
+					if (router_lsa == nullptr) {
 						neighbor->event_bad_ls_req();
 						bad_ls_req = true;
 						break;
 					}
-					memcpy(lsa, LSAHeader::ntoh(&lsa_router->header), sizeof(LSAHeader));
-					lsa += sizeof(LSAHeader);
-					for (auto link : lsa_router->links) {
+					LSARouter* router_lsa_net = (LSARouter*) lsa;
+					memcpy((LSAHeader*)router_lsa_net, LSAHeader::ntoh(&router_lsa->header), sizeof(LSAHeader));
+					router_lsa_net->zero0 = router_lsa->zero0;
+					router_lsa_net->b_v = router_lsa->b_v;
+					router_lsa_net->b_e = router_lsa->b_e;
+					router_lsa_net->b_b = router_lsa->b_b;
+					router_lsa_net->zero1 = router_lsa->zero1;
+					router_lsa_net->links_num = htons(router_lsa->links_num);
+					lsa += sizeof(LSAHeader) + sizeof(uint8_t) * 2 + sizeof(uint16_t);
+					for (auto link : router_lsa->links) {
 						LSARouterLink* router_link = (LSARouterLink*)lsa;
 						router_link->link_id	= htonl(link.link_id);
 						router_link->link_data	= htonl(link.link_data);
@@ -613,6 +620,7 @@ void* recv_ospf_packet_thread(void *inter) {
 						}
 						lsa += sizeof(LSARouterLink);
 					}
+					router_lsa_net->header.ls_checksum = htons(lsa_checksum((LSAHeader*)router_lsa_net));
 				} else if (ls_type == LSA_NETWORK) {
 					LSANetwork* lsa_network = lsdb->find_network_lsa(link_state_id, advertising_router);
 					if (lsa_network == nullptr) {
@@ -706,7 +714,7 @@ void* recv_ospf_packet_thread(void *inter) {
 						LSARouter* tmp = (LSARouter*)lsdb_lsa;
 						lsa_exist = true;
 						lsa_cmp_result = lsa_header_cmp(lsa_header_host, &tmp->header);
-						lsa_self = tmp->header.advertising_router == htonl(myconfigs.router_id);
+						lsa_self = tmp->header.advertising_router == htonl(myconfig.router_id);
 					}
 				} else if (lsa_header_host->ls_type == LSA_NETWORK) {
 					lsdb_lsa = (void*)lsdb->find_network_lsa(lsa_header_host->link_state_id, lsa_header_host->advertising_router);
@@ -831,7 +839,11 @@ void* recv_ospf_packet_thread(void *inter) {
 			}
 			size_t lsack_length = (char*)lsack_lsa_header - lsack_data;
 			if (!bad_ls_req && lsack_length > 0) {
-				send_ospf_packet(ntohl(src.s_addr), T_LSAck, lsack_data, (char*)lsack_lsa_header - lsack_data, interface);
+				if (interface->state == InterfaceState::S_DR || interface->state == InterfaceState::S_BACKUP) {
+					send_ospf_packet(ntohl(inet_addr("224.0.0.5")), T_LSAck, lsack_data, (char*)lsack_lsa_header - lsack_data, interface);
+				} else {
+					send_ospf_packet(ntohl(inet_addr("224.0.0.6")), T_LSAck, lsack_data, (char*)lsack_lsa_header - lsack_data, interface);
+				}
 			}
 			delete lsa_header_host;
 		} else if (ospf_header->type == T_LSAck) {

@@ -3,6 +3,7 @@
 #include "neighbor.h"
 #include "debug.h"
 #include "ospf.h"
+#include "lsa.h"
 
 void Neighbor::event_hello_received() {
 	printf("[Neighbor] %s event_hello_received", ip2string(ip));
@@ -167,6 +168,7 @@ void Neighbor::event_exchange_done() {
 	if (state == NeighborState::S_EXCHANGE) {
 		if (link_state_request_list.empty()) {
 			state = NeighborState::S_FULL;
+			update_lsas(interface);
 			printf(" from EXCHANGE to FULL\n");
 		}
 		else {
@@ -183,6 +185,7 @@ void Neighbor::event_loading_done() {
 	printf("[Neighbor] %s event_loading_done", ip2string(ip));
 	if (state == NeighborState::S_LOADING) {
 		state = NeighborState::S_FULL;
+		update_lsas(interface);
 		printf(" from LOADING to FULL\n");
 	} else {
 		printf(" REJECT\n");

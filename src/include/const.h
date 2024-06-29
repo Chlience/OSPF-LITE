@@ -12,6 +12,6 @@
 #define LS_INFINITY			(0xffffff)
 
 const uint32_t INITIAL_SEQUENCE_NUMBER	= 0x80000001;
-const uint32_t MAX_SEQUENCE_NUMBER 		= 0x7ffffff;
+const uint32_t MAX_SEQUENCE_NUMBER 		= 0x7fffffff;
 
 #endif

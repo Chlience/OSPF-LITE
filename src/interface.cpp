@@ -6,11 +6,11 @@
 #include "debug.h"
 #include "config.h"
 
-extern GlobalConfig myconfigs;
+extern GlobalConfig myconfig;
 
 void* waiting_timer_thread(void *inter) {
     Interface* interface = (Interface*)inter;
-    sleep(myconfigs.dead_interval);
+    sleep(myconfig.dead_interval);
     interface->waiting_timeout = true;
     pthread_exit(nullptr);
 }
@@ -141,7 +141,8 @@ void election_for_dr_and_ndr(Interface* interface, Neighbor** dr_ptr, Neighbor**
     /* 不加入 BDR 选举 */
     if (no_bdr == false && interface->router_priority != 0) {
         Neighbor self(interface->ip_interface_address);
-        self.id     = myconfigs.router_id;
+        self.id     = myconfig.router_id;
+        self.ip     = interface->ip_interface_address;
         self.dr     = interface->dr;
         self.bdr    = interface->bdr;
         self.pri    = interface->router_priority;
@@ -179,12 +180,11 @@ void election_for_dr_and_ndr(Interface* interface, Neighbor** dr_ptr, Neighbor**
             }
         }
     }
-    assert(bdr != nullptr);
 
     /* 重新加入 DR 选举 */
     if (no_bdr == true && interface->router_priority != 0) {
         Neighbor self(interface->ip_interface_address);
-        self.id     = myconfigs.router_id;
+        self.id     = myconfig.router_id;
         self.dr     = interface->dr;
         self.bdr    = interface->bdr;
         self.pri    = interface->router_priority;
@@ -227,10 +227,10 @@ void Interface::call_election() {
         old_dr_ip   = this->dr;
         old_bdr_ip  = this->bdr;
         this->dr    = dr->ip;
-        this->bdr   = bdr->ip;
-        if (ip_interface_address == dr->ip && ip_interface_address != old_dr_ip) {
+        this->bdr = (bdr == nullptr) ? 0 : bdr->ip;
+        if (ip_interface_address == this->dr && ip_interface_address != old_dr_ip) {
             no_bdr = true;
-        } else if (ip_interface_address == bdr->ip && ip_interface_address != old_bdr_ip) {
+        } else if (ip_interface_address == this->bdr && ip_interface_address != old_bdr_ip) {
             no_bdr = false;
         } else {
             break;

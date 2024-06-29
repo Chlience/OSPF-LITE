@@ -5,6 +5,10 @@
 #include "link_state.h"
 #include "math.h"
 #include "debug.h"
+#include "interface.h"
+#include "config.h"
+
+extern GlobalConfig myconfig;
 
 LSAHeader* LSAHeader::ntoh(const LSAHeader* netHeader) {
 	static LSAHeader hostHeader;
@@ -78,6 +82,17 @@ LSANetwork* LSDB::find_network_lsa(uint32_t link_state_id, uint32_t advertising_
 	} else {
 		return nullptr;
 	}
+}
+
+
+void LSDB::remove_router_lsa(uint32_t link_state_id, uint32_t advertising_router) {
+	router_lsas.erase(std::remove_if(router_lsas.begin(), router_lsas.end(), [link_state_id, advertising_router](LSARouter* lsa) {
+		return lsa->header.link_state_id == link_state_id && lsa->header.advertising_router == advertising_router; }));
+}
+
+void LSDB::remove_network_lsa(uint32_t link_state_id, uint32_t advertising_router) {
+	network_lsas.erase(std::remove_if(network_lsas.begin(), network_lsas.end(), [link_state_id, advertising_router](LSANetwork* lsa) {
+		return lsa->header.link_state_id == link_state_id && lsa->header.advertising_router == advertising_router; }));
 }
 
 void LSDB::install_router_lsa(void* data) {

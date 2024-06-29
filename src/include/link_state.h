@@ -6,6 +6,16 @@
 
 #include "const.h"
 
+/** LSAHeader 中 (ls_type, link_state_id, advertising_router) 唯一标识一条 LSA
+ * ls_type				为 lsa 的类型
+ * link_state_id		描述 lsa 的网络部件。
+ * 						对于 Router LSA，link_state_id 为生成该 LSA 的路由器的 Router ID
+ * 						对于 Network LSA，link_state_id 为 DR 的 IP 地址
+ * 						对于 Summary LSA(3)，link_state_id 为目标网络的 IP 地址
+ * 						对于 Summary LSA(4)，link_state_id 为描述的 ASBR 路由器的 Router ID
+ * 						对于 AS External LSA，link_state_id 为网络的 IP 地址
+ * advertising_router	为生成该 LSA 的路由器 Router ID
+ * */
 struct LSAHeader {
 	uint16_t    ls_age;
 	uint8_t     options;
@@ -40,7 +50,7 @@ struct LSARouterLink {
 	uint16_t	metric;
 	/* TOSs */
 	/* 没考虑 tos_num 不等于 0 的情况 */
-};
+}; // 12 bytes
 
 struct LSARouter {
 	LSAHeader	header;
@@ -67,7 +77,8 @@ class LSDB {
 	LSANetwork* find_network_lsa(uint32_t link_state_id, uint32_t advertising_router);
 	void install_router_lsa(void *data);
 	void install_network_lsa(void *data);
+	void remove_router_lsa(uint32_t link_state_id, uint32_t advertising_router);
+	void remove_network_lsa(uint32_t link_state_id, uint32_t advertising_router);
 };
-
 
 #endif

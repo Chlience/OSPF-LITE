@@ -58,6 +58,8 @@ class Interface {
 	std::atomic<bool>	waiting_timeout	= false;
 	pthread_t			waiting_timer;
 
+	uint16_t			cost = 1;
+
 	Interface() = default;
 	// ~Interface();
 
