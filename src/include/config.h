@@ -15,6 +15,7 @@ struct GlobalConfig {
 	uint32_t	dead_interval   = 40;
 	uint32_t	wait_interval   = 40;
     uint8_t     ospf_options    = 0x2; // OPTION_E
+    // uint32_t    inf_trans_delay = 1;
     uint32_t    ls_sequence_cnt;
     // Constructor
     GlobalConfig() {

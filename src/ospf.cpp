@@ -28,6 +28,7 @@ int ospf_init() {
 		printf("getprotobyname() failed, use default value.\n");
 		proto_ospf = new protoent();
 		proto_ospf->p_proto = 89;
+		// printf("%d\b", proto_ospf->p_proto);
 	}
 	return 0;
 }
@@ -72,7 +73,10 @@ void send_ospf_packet(uint32_t dst_ip,
 	Interface* interface) {
 
 	int socket_fd;
-    if ((socket_fd = socket(AF_INET, SOCK_RAW, proto_ospf->p_proto)) < 0) {
+    // if ((socket_fd = socket(AF_INET, SOCK_RAW, proto_ospf->p_proto)) < 0) {
+    //     perror("SendPacket: socket_fd init");
+    // }
+    if ((socket_fd = socket(AF_INET, SOCK_RAW, 89)) < 0) {
         perror("SendPacket: socket_fd init");
     }
 
@@ -491,6 +495,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			LSDB* lsdb = &interface->area->lsdb;
 			lsa_header = (LSAHeader*)(packet + sizeof(iphdr) + sizeof(OSPFHeader) + sizeof(OSPFDD));
 			pthread_mutex_lock(&neighbor->lsr_mutex);
+			pthread_mutex_lock(&lsdb->lsa_mutex);
 			for (; lsa_header != lsa_header_end; ++lsa_header) {
 				LSAHeader header;
 				header.ls_age 				= ntohs(lsa_header->ls_age);
@@ -524,6 +529,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					continue;
 				}
 			}
+			pthread_mutex_unlock(&lsdb->lsa_mutex);
 			pthread_mutex_unlock(&neighbor->lsr_mutex);
 
 			/* 确认前一个数据包时，将已发送的 LSAHeader 从 database summary list 中删除 */
@@ -587,6 +593,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			bool bad_ls_req = false;
 			char* lsu_data = (char*)malloc(1024);
 			char* lsa = lsu_data;
+			pthread_mutex_lock(&lsdb->lsa_mutex);
 			for (; ospf_lsr != ospf_lsr_end; ++ospf_lsr) {
 				uint32_t ls_type = ntohl(ospf_lsr->ls_type);
 				uint32_t link_state_id = ntohl(ospf_lsr->link_state_id);
@@ -620,7 +627,7 @@ void* recv_ospf_packet_thread(void *inter) {
 						}
 						lsa += sizeof(LSARouterLink);
 					}
-					router_lsa_net->header.ls_checksum = htons(lsa_checksum((LSAHeader*)router_lsa_net));
+					router_lsa_net->header.ls_checksum = htons(lsa_checksum((LSAHeader*)router_lsa_net, htons(router_lsa_net->header.length)));
 				} else if (ls_type == LSA_NETWORK) {
 					LSANetwork* lsa_network = lsdb->find_network_lsa(link_state_id, advertising_router);
 					if (lsa_network == nullptr) {
@@ -641,6 +648,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					perror("LSR: lsa type no complement!");
 				}
 			}
+			pthread_mutex_unlock(&lsdb->lsa_mutex);
 			if (bad_ls_req) {
 				free(lsu_data);
 				continue;
@@ -670,11 +678,13 @@ void* recv_ospf_packet_thread(void *inter) {
 			/* 一种直接发向邻居，用于重传 flooding */
 			/* 一种直接发向邻居，用于同步邻居 */
 			/* 两者通过 dst.ip 和 state 进行区分 */
+			pthread_mutex_lock(&lsdb->lsa_mutex);
 			for (int i = 0; i < lsa_num; ++i, lsa_header_ptr += ntohs(lsa_header->length)) {
 				lsa_header = (LSAHeader*)lsa_header_ptr;
 				memcpy(lsa_header_host, LSAHeader::ntoh((LSAHeader*)lsa_header_ptr), sizeof(LSAHeader));
 				/* 1. 检查 LS CHECKSUM */
-				if (lsa_header->ls_checksum != htons(lsa_checksum(lsa_header))) {
+				if (lsa_header->ls_checksum != htons(lsa_checksum(lsa_header, htons(lsa_header->length)))) {
+					debugf("LSU packet REJECT for checksum error\n");
 					continue;	
 				}
 				/* 2. 检查 LS TYPE */
@@ -837,6 +847,7 @@ void* recv_ospf_packet_thread(void *inter) {
 					perror("No complement!\n");
 				}
 			}
+			pthread_mutex_unlock(&lsdb->lsa_mutex);
 			size_t lsack_length = (char*)lsack_lsa_header - lsack_data;
 			if (!bad_ls_req && lsack_length > 0) {
 				if (interface->state == InterfaceState::S_DR || interface->state == InterfaceState::S_BACKUP) {

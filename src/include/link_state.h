@@ -31,7 +31,7 @@ struct LSAHeader {
 }; // 20 bytes
 
 int lsa_header_cmp(const LSAHeader*, const LSAHeader*);
-uint16_t lsa_checksum(const LSAHeader*);
+uint16_t lsa_checksum(const LSAHeader*, uint16_t length);
 uint16_t lsa_checksum_ru(const void* data, size_t len, int checksum_offset);
 
 enum LSAType : uint8_t {
@@ -73,6 +73,11 @@ class LSDB {
 	public:
 	std::vector<LSARouter*> router_lsas;
 	std::vector<LSANetwork*> network_lsas;
+	pthread_t	aging_thread;
+	pthread_mutex_t lsa_mutex = PTHREAD_MUTEX_INITIALIZER;
+	
+	LSDB();
+
 	LSARouter* find_router_lsa(uint32_t link_state_id, uint32_t advertising_router);
 	LSANetwork* find_network_lsa(uint32_t link_state_id, uint32_t advertising_router);
 	void install_router_lsa(void *data);
@@ -80,5 +85,9 @@ class LSDB {
 	void remove_router_lsa(uint32_t link_state_id, uint32_t advertising_router);
 	void remove_network_lsa(uint32_t link_state_id, uint32_t advertising_router);
 };
+
+
+void* lsdb_aging_thread(void *data);
+
 
 #endif

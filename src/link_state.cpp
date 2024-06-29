@@ -1,6 +1,8 @@
 #include <arpa/inet.h>
 #include <cstring>
 #include <algorithm>
+#include <pthread.h>
+#include <unistd.h>
 
 #include "link_state.h"
 #include "math.h"
@@ -205,8 +207,8 @@ uint16_t fletcher16_ru(const void* data, size_t len, int checksum_offset) {
 	return (x << 8) | y;
 }
 
-uint16_t lsa_checksum(const LSAHeader* lsa_header) {
-	uint16_t length = ntohs(lsa_header->length);
+uint16_t lsa_checksum(const LSAHeader* lsa_header, const uint16_t length) {
+	debugf("lsa_checksum: length = %d\n", length);
 	void *p = malloc(length);
 	memcpy(p, lsa_header, length);
 	LSAHeader* lsa_header_copy = (LSAHeader*)p;
@@ -215,4 +217,29 @@ uint16_t lsa_checksum(const LSAHeader* lsa_header) {
 	uint16_t checksum = fletcher16_ru((uint8_t*)p + 2, length - 2, 14);
 	free(p);
 	return checksum;
+}
+
+LSDB::LSDB() {
+	pthread_create(&aging_thread, nullptr, lsdb_aging_thread, (void*)this);
+}
+
+void* lsdb_aging_thread(void *data) {
+	while(true) {
+		sleep(1);
+		OSPFArea* area = (OSPFArea*)data;
+		LSDB* lsdb = &area->lsdb;
+		pthread_mutex_lock(&lsdb->lsa_mutex);
+		for (auto it : lsdb->router_lsas) {
+			if (it->header.ls_age < 0xff) {
+				it->header.ls_age++;
+			}
+		}
+		for (auto it : lsdb->network_lsas) {
+			if (it->header.ls_age < 0xff) {
+				it->header.ls_age++;
+			}
+		}
+		pthread_mutex_unlock(&lsdb->lsa_mutex);
+	}
+	pthread_exit(NULL);
 }

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include "lsa.h"
 #include "config.h"
@@ -97,6 +98,7 @@ void update_lsas(Interface* interface) {
 	lsu->num = 0;
 	char* ptr = data + sizeof(OSPFLsu);
 	LSDB* lsdb = &interface->area->lsdb;
+	pthread_mutex_lock(&lsdb->lsa_mutex);
 
 	if (interface->state == InterfaceState::S_DR) {
 		LSANetwork* network_lsa = generate_network_lsa(interface);
@@ -122,7 +124,7 @@ void update_lsas(Interface* interface) {
 				*(uint32_t*)ptr = htonl(router);
 				ptr += sizeof(uint32_t);
 			}
-			lsa_header->ls_checksum = htons(lsa_checksum(lsa_header));
+			lsa_header->ls_checksum = htons(lsa_checksum(lsa_header, ntohs(lsa_header->length)));
 		}
 		delete network_lsa;
 	}
@@ -163,10 +165,11 @@ void update_lsas(Interface* interface) {
 				}
 				ptr += sizeof(LSARouterLink);
 			}
-			router_lsa_net->header.ls_checksum = htons(lsa_checksum((LSAHeader*)router_lsa_net));
+			router_lsa_net->header.ls_checksum = htons(lsa_checksum((LSAHeader*)router_lsa_net, ntohs(router_lsa_net->header.length)));
 		}
 		delete router_lsa;
 	}
+	pthread_mutex_unlock(&lsdb->lsa_mutex);
 	
 	if (lsu->num != 0) {
 		if (interface->state == InterfaceState::S_DR || interface->state == InterfaceState::S_BACKUP) {
