@@ -178,5 +178,25 @@ void Neighbor::event_loading_done() {
 
 void Neighbor::event_bad_ls_req() {
 	printf("[Neighbor] %s event_bad_ls_req", ip2string(ip));
-	perror("Not implemented yet\n");
+	/* 和 seq_number_mismatch 完全一致 */
+	if (state >= NeighborState::S_EXCHANGE) {
+		state = NeighborState::S_EXSTART;
+
+		link_state_retransmission_list.clear();
+		database_summary_list.clear();
+		pthread_mutex_lock(&lsr_mutex);
+		link_state_request_list.clear();
+		pthread_mutex_unlock(&lsr_mutex);
+		if (is_empty_dd_sender_running == false) {
+			pthread_create(&empty_dd_sender, nullptr, send_empty_dd_packet_thread, (void*)this);
+		} else {
+			empty_dd_sender_stop = true;
+			pthread_join(empty_dd_sender, nullptr);
+			empty_dd_sender_stop = false;
+			pthread_create(&empty_dd_sender, nullptr, send_empty_dd_packet_thread, (void*)this);
+		}
+		printf(" from EXCHANGE or greater to EXSTART\n");
+	} else {
+		printf(" REJECT\n");
+	}
 }

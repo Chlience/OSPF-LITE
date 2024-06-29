@@ -16,7 +16,8 @@ struct LSAHeader {
 	uint16_t    ls_checksum;
 	uint16_t    length;
 
-	static LSAHeader* ntoh(const LSAHeader* netHeader);
+	static LSAHeader* ntoh(const LSAHeader*);
+	static LSAHeader* hton(const LSAHeader*);
 }; // 20 bytes
 
 int lsa_header_cmp(const LSAHeader*, const LSAHeader*);

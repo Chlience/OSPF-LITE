@@ -613,6 +613,71 @@ void* recv_ospf_packet_thread(void *inter) {
 			/* 其他路由器向多播地址 ALLDRouters 发送 LSU 和 LSAck */
 			/* 重传的 LSU 包直接被发往邻居 */
 			debugf(" LSR packet <TODO>\n");
+			Neighbor* neighbor = interface->find_neighbor(ntohl(src.s_addr));
+			assert(neighbor != nullptr);
+			if (neighbor->state != NeighborState::S_EXCHANGE && neighbor->state != NeighborState::S_LOADING && neighbor->state != NeighborState::S_FULL) {
+				debugf(" LSR packet REJECT for neighbor state\n");
+				continue;
+			}
+
+			OSPFLsr* ospf_lsr = (OSPFLsr*)(packet + sizeof(iphdr) + sizeof(OSPFHeader));
+			OSPFLsr* ospf_lsr_end = (OSPFLsr*)(packet + sizeof(iphdr) + ntohs(ospf_header->packet_length));
+			LSDB* lsdb = &interface->area->lsdb;
+			bool bad_ls_req = false;
+			char* lsu_data = (char*)malloc(1024);
+			char* lsa = lsu_data;
+			for (; ospf_lsr != ospf_lsr_end; ++ospf_lsr) {
+				uint32_t ls_type = ntohl(ospf_lsr->ls_type);
+				uint32_t link_state_id = ntohl(ospf_lsr->link_state_id);
+				uint32_t advertising_router = ntohl(ospf_lsr->advertising_router);
+
+				if (ls_type == LSA_ROUTER) {
+					LSARouter* lsa_router = lsdb->find_router_lsa(link_state_id, advertising_router);
+					if (lsa_router == nullptr) {
+						neighbor->event_bad_ls_req();
+						bad_ls_req = true;
+						break;
+					}
+					memcpy(lsa, LSAHeader::ntoh(&lsa_router->header), sizeof(LSAHeader));
+					lsa += sizeof(LSAHeader);
+					for (auto link : lsa_router->links) {
+						LSARouterLink* router_link = (LSARouterLink*)lsa;
+						router_link->link_id	= htonl(link.link_id);
+						router_link->link_data	= htonl(link.link_data);
+						router_link->type		= link.type;
+						router_link->tos_num	= link.tos_num;
+						router_link->metric		= htons(link.metric);
+						if (link.tos_num != 0) {
+							perror("TODO: TOS\n");
+						}
+						lsa += sizeof(LSARouterLink);
+					}
+				} else if (ls_type == LSA_NETWORK) {
+					LSANetwork* lsa_network = lsdb->find_network_lsa(link_state_id, advertising_router);
+					if (lsa_network == nullptr) {
+						neighbor->event_bad_ls_req();
+						bad_ls_req = true;
+						break;
+					}
+					memcpy(lsa, LSAHeader::ntoh(&lsa_network->header), sizeof(LSAHeader));
+					lsa += sizeof(LSAHeader);
+					*(uint32_t*)lsa = htonl(lsa_network->network_mask);
+					lsa += sizeof(uint32_t);
+
+					for (auto attach_router : lsa_network->attached_routers) {
+						*(uint32_t*)lsa = htonl(attach_router);
+						lsa += sizeof(uint32_t);
+					}
+				} else {
+					perror("LSR: lsa type no complement!");
+				}
+			}
+			if (bad_ls_req) {
+				free(lsu_data);
+				continue;
+			}
+			send_ospf_packet(neighbor->ip, T_LSU, lsu_data, lsa - lsu_data, interface);
+			free(lsu_data);
 		} else if (ospf_header->type == T_LSU) {
 			debugf(" LSU packet\n");
 			OSPFLsu* ospf_lsu = (OSPFLsu*)(packet + sizeof(iphdr) + sizeof(OSPFHeader));
@@ -803,7 +868,6 @@ void* recv_ospf_packet_thread(void *inter) {
 					perror("No complement!\n");
 				}
 			}
-			debugf("sendLSAck\n");
 			size_t lsack_length = (char*)lsack_lsa_header - lsack_data;
 			if (!bad_ls_req && lsack_length > 0) {
 				send_ospf_packet(ntohl(src.s_addr), T_LSAck, lsack_data, (char*)lsack_lsa_header - lsack_data, interface);

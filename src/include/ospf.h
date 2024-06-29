@@ -37,7 +37,7 @@ struct OSPFDD {
     uint32_t    dd_seq_num;
 };  // 8 bytes
 
-struct OSPFLsr {
+struct OSPFLsr { // 事实上是 LSR 中的一项
     uint32_t    ls_type;
     uint32_t    link_state_id;
     uint32_t    advertising_router;

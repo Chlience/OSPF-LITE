@@ -19,6 +19,19 @@ LSAHeader* LSAHeader::ntoh(const LSAHeader* netHeader) {
 	return &hostHeader;
 }
 
+LSAHeader* LSAHeader::hton(const LSAHeader* header_host) {
+	static LSAHeader header_net;
+	header_net.ls_age = htonl(header_host->ls_age);
+	header_net.options = header_host->options;
+	header_net.ls_type = header_host->ls_type;
+	header_net.link_state_id = htonl(header_host->link_state_id);
+	header_net.advertising_router = htonl(header_host->advertising_router);
+	header_net.ls_seq_num = htonl(header_host->ls_seq_num);
+	header_net.ls_checksum = htons(header_host->ls_checksum);
+	header_net.length = htons(header_host->length);
+	return &header_net;
+}
+
 int lsa_header_cmp(const LSAHeader* a, const LSAHeader* b) {
 	if (a->ls_seq_num != b->ls_seq_num) {
 		return a->ls_seq_num < b->ls_seq_num ? 1 : -1;
