@@ -5,8 +5,6 @@
 #include <stddef.h>
 #include <cstring>
 
-#include "area.h"
-
 struct GlobalConfig {
     const char* nic_name;
     uint32_t    ip;
