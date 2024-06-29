@@ -688,7 +688,12 @@ void* recv_ospf_packet_thread(void *inter) {
 						LSANetwork* tmp = (LSANetwork*)lsdb_lsa;
 						lsa_exist = true;
 						lsa_cmp_result = lsa_header_cmp(lsa_header_host, &tmp->header);
-						lsa_self = tmp->header.advertising_router == htonl(myconfigs.router_id);
+						for (auto inter: interface->area->interfaces) {
+							if (inter->ip_interface_address == htonl(lsa_header_host->link_state_id)) {
+								lsa_self = true;
+								break;
+							}
+						}
 					}
 				} else {
 					perror("No complement!\n");
