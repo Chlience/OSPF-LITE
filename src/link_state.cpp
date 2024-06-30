@@ -89,22 +89,22 @@ LSANetwork* LSDB::find_network_lsa(uint32_t link_state_id, uint32_t advertising_
 
 void LSDB::remove_router_lsa(uint32_t link_state_id, uint32_t advertising_router) {
 	router_lsas.erase(std::remove_if(router_lsas.begin(), router_lsas.end(), [link_state_id, advertising_router](LSARouter* lsa) {
-		return lsa->header.link_state_id == link_state_id && lsa->header.advertising_router == advertising_router; }));
+		return lsa->header.link_state_id == link_state_id && lsa->header.advertising_router == advertising_router; }),
+		router_lsas.end());
 }
 
 void LSDB::remove_network_lsa(uint32_t link_state_id, uint32_t advertising_router) {
 	network_lsas.erase(std::remove_if(network_lsas.begin(), network_lsas.end(), [link_state_id, advertising_router](LSANetwork* lsa) {
-		return lsa->header.link_state_id == link_state_id && lsa->header.advertising_router == advertising_router; }));
+		return lsa->header.link_state_id == link_state_id && lsa->header.advertising_router == advertising_router; }),
+		network_lsas.end());
 }
 
 void LSDB::install_router_lsa(void* data) {
 	LSAHeader* lsa_header_host = new LSAHeader(*LSAHeader::ntoh((LSAHeader*)data));
 	/* 删除旧 LSA */
-	auto it = std::find_if(router_lsas.begin(), router_lsas.end(), [lsa_header_host](LSARouter* lsa) {
-		return lsa->header.link_state_id == lsa_header_host->link_state_id && lsa->header.advertising_router == lsa_header_host->advertising_router; });
-	if (it != router_lsas.end()) {
-		router_lsas.erase(it);
-	}
+	router_lsas.erase(std::remove_if(router_lsas.begin(), router_lsas.end(), [lsa_header_host](LSARouter* lsa) {
+		return lsa->header.link_state_id == lsa_header_host->link_state_id && lsa->header.advertising_router == lsa_header_host->advertising_router; }),
+		router_lsas.end());
 	/* 插入新 LSA */
 	LSARouter* lsa_router_net = (LSARouter*)data;
 	LSARouter* lsa_router_host = new LSARouter;
@@ -115,7 +115,7 @@ void LSDB::install_router_lsa(void* data) {
 	lsa_router_host->b_b		= lsa_router_net->b_b;
 	lsa_router_host->zero1	= 0;
 	lsa_router_host->links_num = ntohs(lsa_router_net->links_num);
-	LSARouterLink* link_net = (LSARouterLink*)((char*)data + sizeof(LSAHeader) + sizeof(LSARouter));
+	LSARouterLink* link_net = (LSARouterLink*)((char*)data + sizeof(LSAHeader) + sizeof(uint8_t) * 2 + sizeof(uint16_t));
 	for (int i = 0; i < lsa_router_host->links_num; ++i) {
 		LSARouterLink link;
 		link.link_id	= ntohl(link_net->link_id);
@@ -129,7 +129,7 @@ void LSDB::install_router_lsa(void* data) {
 		}
 		++link_net;
 	}
-	delete lsa_router_host;
+	router_lsas.push_back(lsa_router_host);
 	delete lsa_header_host;
 }
 
@@ -137,13 +137,10 @@ void LSDB::install_network_lsa(void *data) {
 	LSANetwork* lsa_network_net = (LSANetwork*)data;
 	LSANetwork* lsa_network_host = new LSANetwork;
 	lsa_network_host->header = *LSAHeader::ntoh(&lsa_network_net->header);
-
 	/* 删除旧 LSA */
-	auto it = std::find_if(network_lsas.begin(), network_lsas.end(), [lsa_network_host](LSANetwork* lsa) {
-		return lsa->header.link_state_id == lsa_network_host->header.link_state_id && lsa->header.advertising_router == lsa_network_host->header.advertising_router; });
-	if (it != network_lsas.end()) {
-		network_lsas.erase(it);
-	}
+	network_lsas.erase(std::remove_if(network_lsas.begin(), network_lsas.end(), [lsa_network_host](LSANetwork* lsa) {
+		return lsa->header.link_state_id == lsa_network_host->header.link_state_id && lsa->header.advertising_router == lsa_network_host->header.advertising_router; }),
+		network_lsas.end());
 	/* 插入新 LSA */
 	uint32_t* network_router = (uint32_t*)((char *)data + sizeof(LSAHeader) + sizeof(uint32_t));
 	uint32_t* network_router_end = (uint32_t*)((char *)data + lsa_network_host->header.length);
@@ -153,7 +150,6 @@ void LSDB::install_network_lsa(void *data) {
 		lsa_network_host->attached_routers.push_back(network_router_host);
 	}
 	network_lsas.push_back(lsa_network_host);
-	delete lsa_network_host;
 }
 
 uint16_t fletcher16(const uint8_t* data, size_t len) { // form wikipedia
@@ -213,7 +209,6 @@ uint16_t lsa_checksum(const LSAHeader* lsa_header, const uint16_t length) {
 	memcpy(p, lsa_header, length);
 	LSAHeader* lsa_header_copy = (LSAHeader*)p;
 	lsa_header_copy->ls_checksum = 0;
-
 	uint16_t checksum = fletcher16_ru((uint8_t*)p + 2, length - 2, 14);
 	free(p);
 	return checksum;

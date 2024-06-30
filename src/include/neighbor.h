@@ -100,10 +100,12 @@ class Neighbor {
 	std::list<LSAHeader>	database_summary_list;			// 需要通过 DD 包发送的 LSA 列表
 	std::list<LSAHeader>	link_state_request_list;		// 通过 DD 包获得需要同步的的未知 LSA 或者已知 LSA 的最新拷贝
 	Interface*		interface;
+
 	pthread_t		empty_dd_sender;
 	bool			is_empty_dd_sender_running;
 	bool			empty_dd_sender_stop;
 
+	bool			lsr_sender_created;
 	pthread_t		lsr_sender;
 	pthread_mutex_t lsr_mutex;
 	pthread_cond_t	lsr_cond;
@@ -111,26 +113,32 @@ class Neighbor {
 	pthread_t		retrans_sender;
 	pthread_mutex_t retrans_mutex;
 
+	timespec		last_recv_hello_time;
+
 	bool operator < (const Neighbor& other) const {
         return ip < other.ip;
     }
 
 	Neighbor(uint32_t ip):ip(ip) {
 		state = NeighborState::S_DOWN;
-		is_master	= false;
-		dd_seq_num	= 0;
-		last_recv_dd_seq_num	= 0;
-		id		= 0;
-		pri		= 0;
+		is_master	= false;			// EXSTART
+		dd_seq_num	= 0;				// EXSTART
+		last_recv_dd_seq_num	= 0;	// EXSTART
+		last_send_dd_data_len 	= 0;	// EXSTART
+		id		= 0;			
 		options	= 0x2;
-		dr		= 0;
-		bdr		= 0;
+		pri		= 0;		// INIT
+		dr		= 0;		// INIT
+		bdr		= 0;		// INIT
 		interface	= nullptr;
-		last_send_dd_data_len 	= 0;
-		empty_dd_sender_stop	= false;
-		is_empty_dd_sender_running = false;
+		empty_dd_sender				= 0;
+		empty_dd_sender_stop		= false;
+		is_empty_dd_sender_running	= false;
+		lsr_sender_created	= false;
+		lsr_sender		= 0;
 		lsr_mutex		= PTHREAD_MUTEX_INITIALIZER;
 		lsr_cond		= PTHREAD_COND_INITIALIZER;
+		retrans_sender	= 0;
 		retrans_mutex	= PTHREAD_MUTEX_INITIALIZER;
 	}
 
@@ -143,6 +151,7 @@ class Neighbor {
 	void event_loading_done();
 	void event_seq_number_mismatch();
 	void event_bad_ls_req();
+	void event_inactivity_timer();
 };
 
 #endif

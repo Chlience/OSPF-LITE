@@ -92,7 +92,7 @@ void send_ospf_packet(uint32_t dst_ip,
     }
 
 	/* 1480 = 1500(MTU) - 20(IP_HEADER) */
-	char* ospf_packet = (char*) malloc(1480);
+	char* ospf_packet = (char*)malloc(1480);
 	/* 设置 ospf header */
 	size_t ospf_len = ospf_data_len + sizeof(OSPFHeader);
 	OSPFHeader* ospf_header 	= (OSPFHeader*)ospf_packet;
@@ -160,14 +160,10 @@ void* send_ospf_hello_packet_thread(void* inter) {
 	/* 1480 = 1500(MTU) - 20(IP_HEADER) */
 	char* ospf_packet = (char*) malloc(1480);
 	while (true) {
-		size_t ospf_len = sizeof(OSPFHeader) + sizeof(OSPFHello) + 4 * interface->neighbors.size();
-		
-		/* 头部 */
-		
+		size_t ospf_len = sizeof(OSPFHeader) + sizeof(OSPFHello);
 		OSPFHeader* ospf_header 	= (OSPFHeader*)ospf_packet;
 		ospf_header->version		= 2;
 		ospf_header->type 			= 1;
-		ospf_header->packet_length 	= htons(ospf_len);
 		ospf_header->router_id 		= htonl(myconfig.router_id);
 		ospf_header->area_id   		= htonl(interface->area->id);
 		ospf_header->checksum 		= 0;
@@ -178,27 +174,26 @@ void* send_ospf_hello_packet_thread(void* inter) {
 		} else {
 			perror("SendPacket: Unsupport Authentication Type\n");
 		}
-
-		/* 载荷 */
-
 		OSPFHello* ospf_hello = (OSPFHello*)(ospf_packet + sizeof(OSPFHeader)); 
-        ospf_hello->ip_interface_mask				= htonl(interface->ip_interface_mask);	// 对应接口的 ip_interface_mask
+        ospf_hello->ip_interface_mask			= htonl(interface->ip_interface_mask);	// 对应接口的 ip_interface_mask
         ospf_hello->hello_interval				= htons(myconfig.hello_interval);
         ospf_hello->options						= 0x02;
         ospf_hello->rtr_pri						= 1;
         ospf_hello->router_dead_interval		= htonl(myconfig.dead_interval);
         ospf_hello->designated_router			= htonl(interface->dr);
         ospf_hello->backup_designated_router	= htonl(interface->bdr);
-
-		/* 填写 Neighbors 的 router id */
 		uint32_t* ospf_hello_neighbor = (uint32_t*)(ospf_packet + sizeof(OSPFHeader) + sizeof(OSPFHello));
         for (auto nbr: interface->neighbors) {
-            *ospf_hello_neighbor++ = htonl(nbr->id);
+			if (nbr->state == NeighborState::S_DOWN) {
+				continue;
+			}
+            *ospf_hello_neighbor = htonl(nbr->id);
+			ospf_len += sizeof(uint32_t);
+			++ospf_hello_neighbor;
         }
-
 		/* 计算校验和 */
+		ospf_header->packet_length 	= htons(ospf_len);
 		ospf_header->checksum 		= ospf_checksum(ospf_packet, ospf_len);
-
 		/* Send Packet */
 		if (sendto(socket_fd, ospf_packet, ospf_len, 0, (struct sockaddr*)&dst_sockaddr, sizeof(dst_sockaddr)) < 0) {
 			perror("SendHelloPacket: sendto");
@@ -230,16 +225,26 @@ void* recv_ospf_packet_thread(void *inter) {
     struct in_addr src, dst;
 	
 	while (true) {
+		/* Hello Timer */
 		if (interface->state == InterfaceState::S_WAITING && interface->waiting_timeout == true) {
 			interface->event_wait_timer();
 		}
-		memset(frame, 0, 1514);
+		timespec now;
+		clock_gettime(CLOCK_REALTIME, &now);
+		for (auto neighbor: interface->neighbors) {
+			if (neighbor->state == NeighborState::S_DOWN) {
+				continue;
+			}
+			if (neighbor->last_recv_hello_time.tv_sec + interface->router_dead_interval < now.tv_sec) {
+				neighbor->event_inactivity_timer();
+				interface->event_neighbor_change();
+			}
+		}
+		/* Recv frame */
 		recv(socket_fd, frame, 1514, 0);
 		packet = frame + sizeof(struct ethhdr);
 		ip_header = (struct iphdr*)packet;
-
 		/* IP 校验和错误的包已被丢弃 */
-
 		/* 目的地址必须是接收接口地址或者是多播地址 */
 		/* ALLSPFRouters	224.0.0.5 */
 		/* ALLDRouter		224.0.0.6 */
@@ -249,18 +254,15 @@ void* recv_ospf_packet_thread(void *inter) {
 		&& dst.s_addr != inet_addr("224.0.0.6")) {
 			continue;
 		}
-
 		/* 丢弃非 OSPF 包 */
 		if (ip_header->protocol != proto_ospf->p_proto) {
 			continue;
 		}
-
 		/* 检查发送的对象是否是本机 */
 		src.s_addr = ip_header->saddr;
 		if (src.s_addr == htonl(interface->ip_interface_address)) {
 			continue;
 		}
-
 		/* 校验 OSPF 包头 */
 		OSPFHeader* ospf_header = (OSPFHeader*)(packet + sizeof(struct iphdr));
 		if (ospf_header->version != 2) {
@@ -270,24 +272,22 @@ void* recv_ospf_packet_thread(void *inter) {
 			/* 源和目的接口是否在同一网络上校验略过 */
 			continue;
 		}
+		/* 非 DR 和 BDR 不处理发往 ALLDRouter 的包 */
 		if (dst.s_addr == inet_addr("224.0.0.6")) {
 			if (interface->state != InterfaceState::S_DR && interface->state != InterfaceState::S_BACKUP) {
 				continue;
 			}
 		}
+		/* 仅支持空验证 */
 		if (ospf_header->autype != interface->au_type) {
 			continue;
 		}
-		/* 仅支持空验证 */
-
 		/* 接收到一个合法的 OSPF 包 */
 		debugf("RecvPacket: from %s", inet_ntoa(src));
-
 		/* 处理 Hello 包 */
 		if (ospf_header->type == T_HELLO) {
 			debugf(" Hello packet\n");
 			OSPFHello* ospf_hello = (OSPFHello*)(packet + sizeof(struct iphdr) + sizeof(OSPFHeader));
-
 			/* 检查选项参数是否匹配 */
 			if (ospf_hello->options != myconfig.ospf_options) {
 				debugf("RecvPacket: Options mismatch\n");
@@ -298,39 +298,31 @@ void* recv_ospf_packet_thread(void *inter) {
 				debugf("RecvPacket: Interval mismatch\n");
 				continue;
 			}
-
 			uint32_t src_ip = ntohl(src.s_addr);
 			// uint32_t dst_ip = ntohl(dst.s_addr);
-			uint32_t pre_dr, pre_bdr;
-			uint8_t pre_pri;
-			bool new_neighbor = false;
-
 			auto neighbor = interface->find_neighbor(src_ip);
 			if (neighbor == nullptr) {
 				Neighbor* neig = new Neighbor(src_ip);
 				interface->add_neighbor(neig);
 				debugf("RecvPacket: Add %s into neighbors\n", n_ip2string(ospf_header->router_id));
 				neighbor = interface->find_neighbor(src_ip);
-				new_neighbor = true;
-				pre_pri = 0;
-				pre_dr 	= 0;
-				pre_bdr = 0;
-			} else {
-				pre_pri = neighbor->pri;
-				pre_dr 	= neighbor->dr;
-				pre_bdr = neighbor->bdr;
 			}
+			bool new_neighbor = false;
+			if (neighbor->state == NeighborState::S_DOWN) {
+				new_neighbor = true;
+
+			}
+			/* 收到 Hello 包 */
+			neighbor->event_hello_received();
+			uint32_t pre_dr		= neighbor->dr;
+			uint32_t pre_bdr	= neighbor->bdr;
+			uint8_t  pre_pri	= neighbor->pri;
 			// 检查 options
 			neighbor->id	= ntohl(ospf_header->router_id);
 			neighbor->dr	= ntohl(ospf_hello->designated_router);
 			neighbor->bdr	= ntohl(ospf_hello->backup_designated_router);
 			neighbor->pri	= ospf_hello->rtr_pri;
 			neighbor->options = ospf_hello->options;
-
-			assert(neighbor != nullptr);
-			/* 收到 Hello 包 */
-			neighbor->event_hello_received();
-
 			/* 检查自己的 router id 是否在 Hello 报文中 */
 			uint32_t* ospf_hello_neighbor 	= (uint32_t*)(packet + sizeof(struct iphdr) + sizeof(OSPFHeader) + sizeof(OSPFHello));
 			uint32_t* ospf_end 				= (uint32_t*)(packet + sizeof(struct iphdr) + ntohs(ospf_header->packet_length));
@@ -347,7 +339,7 @@ void* recv_ospf_packet_thread(void *inter) {
 				neighbor->event_1way_received();
 				continue;
 			}
-			
+			/* 检查事件 */
 			if (pre_pri != neighbor->pri && !new_neighbor) {
 				interface->event_neighbor_change();
 			} else if (neighbor->dr == neighbor->ip && neighbor->bdr == 0x00000000 && interface->state == InterfaceState::S_WAITING) {
@@ -367,10 +359,10 @@ void* recv_ospf_packet_thread(void *inter) {
 			debugf(" DD packet\n");
 			OSPFDD* ospf_dd = (OSPFDD*)(packet + sizeof(iphdr) + sizeof(OSPFHeader));
 			Neighbor* neighbor = interface->find_neighbor(ntohl(src.s_addr));
-
-			assert(neighbor != nullptr);
+			if (neighbor == nullptr) {
+				continue;
+			}
 			bool is_dumplicated = false;
-
 			uint32_t seq_num = ntohl(ospf_dd->dd_seq_num);
             if (seq_num == neighbor->last_recv_dd_seq_num
 			&& ospf_dd->b_I == neighbor->last_recv_dd_i
@@ -467,7 +459,7 @@ void* recv_ospf_packet_thread(void *inter) {
 						debugf("DD packet IGNORE for receiving dumplicated packet. (S_LOADING / S_FULL)\n");
 					}
 				} else {
-					debugf("DD packet IGNORE for not dumplicating packet. (S_LOADING)\n");
+					debugf("DD packet IGNORE for not dumplicating packet. (S_LOADING / S_FULL)\n");
 				}
 				continue;
 			} else {
@@ -497,41 +489,41 @@ void* recv_ospf_packet_thread(void *inter) {
 			pthread_mutex_lock(&neighbor->lsr_mutex);
 			// pthread_mutex_lock(&lsdb->lsa_mutex);
 			for (; lsa_header != lsa_header_end; ++lsa_header) {
-				LSAHeader header;
-				header.ls_age 				= ntohs(lsa_header->ls_age);
-				header.options 				= lsa_header->options;
-				header.ls_type 				= lsa_header->ls_type;
-				header.link_state_id 		= ntohl(lsa_header->link_state_id);
-				header.advertising_router 	= ntohl(lsa_header->advertising_router);
-				header.ls_seq_num 			= ntohl(lsa_header->ls_seq_num);
-				header.ls_checksum 			= ntohs(lsa_header->ls_checksum);
-				header.length 				= ntohs(lsa_header->length);
-				if (header.ls_type == LSA_ROUTER) {
-					LSARouter* lsa_router = lsdb->find_router_lsa(header.link_state_id, header.advertising_router);
+				LSAHeader* header = new LSAHeader;
+				header->ls_age 				= ntohs(lsa_header->ls_age);
+				header->options 			= lsa_header->options;
+				header->ls_type 			= lsa_header->ls_type;
+				header->link_state_id 		= ntohl(lsa_header->link_state_id);
+				header->advertising_router 	= ntohl(lsa_header->advertising_router);
+				header->ls_seq_num 			= ntohl(lsa_header->ls_seq_num);
+				header->ls_checksum 		= ntohs(lsa_header->ls_checksum);
+				header->length 				= ntohs(lsa_header->length);
+				if (header->ls_type == LSA_ROUTER) {
+					LSARouter* lsa_router = lsdb->find_router_lsa(header->link_state_id, header->advertising_router);
 					if (lsa_router == nullptr) {
-						neighbor->link_state_request_list.push_back(header);
+						neighbor->link_state_request_list.push_back(*header);
 					} else {
-						if (lsa_header_cmp(&header, &lsa_router->header) < 0) {
-							neighbor->link_state_request_list.push_back(header);
+						if (lsa_header_cmp(header, &lsa_router->header) < 0) {
+							neighbor->link_state_request_list.push_back(*header);
 						}
 					}
-				} else if (header.ls_age == LSA_NETWORK) {
-					LSANetwork* lsa_network = lsdb->find_network_lsa(header.link_state_id, header.advertising_router);
+				} else if (header->ls_age == LSA_NETWORK) {
+					LSANetwork* lsa_network = lsdb->find_network_lsa(header->link_state_id, header->advertising_router);
 					if (lsa_network == nullptr) {
-						neighbor->link_state_request_list.push_back(header);
+						neighbor->link_state_request_list.push_back(*header);
 					} else {
-						if (lsa_header_cmp(&header, &lsa_network->header) < 0) {
-							neighbor->link_state_request_list.push_back(header);
+						if (lsa_header_cmp(header, &lsa_network->header) < 0) {
+							neighbor->link_state_request_list.push_back(*header);
 						}
 					}
 				} else {
 					debugf("DD packet REJECT for invalid LSA Header\n");
-					continue;
 				}
+				/* list 中存的是拷贝，直接 delete */
+				delete header;
 			}
 			// pthread_mutex_unlock(&lsdb->lsa_mutex);
 			pthread_mutex_unlock(&neighbor->lsr_mutex);
-
 			/* 确认前一个数据包时，将已发送的 LSAHeader 从 database summary list 中删除 */
 			if (neighbor->last_send_dd_data_len != 0) {
 				int cnt = (neighbor->last_send_dd_data_len - sizeof(OSPFDD)) / sizeof(LSAHeader);
@@ -540,12 +532,10 @@ void* recv_ospf_packet_thread(void *inter) {
 					--cnt;
 				}
 			}
-
 			/* 发送一个 DD 包 */
 			if (ospf_dd->b_M == 0 && neighbor->database_summary_list.empty()) {
 				neighbor->event_exchange_done();
 			}
-
 			char* send_dd_data = (char*)malloc(1024);
 			uint32_t send_dd_data_len = sizeof(OSPFDD);
 			OSPFDD* send_ospf_dd = (OSPFDD*)send_dd_data;
@@ -579,7 +569,7 @@ void* recv_ospf_packet_thread(void *inter) {
 			/* DR 和 BDR 向多播地址 ALLSPFRouters 发送 LSU 和 LSAck */
 			/* 其他路由器向多播地址 ALLDRouters 发送 LSU 和 LSAck */
 			/* 重传的 LSU 包直接被发往邻居 */
-			debugf(" LSR packet <TODO>\n");
+			debugf(" LSR packet\n");
 			Neighbor* neighbor = interface->find_neighbor(ntohl(src.s_addr));
 			assert(neighbor != nullptr);
 			if (neighbor->state != NeighborState::S_EXCHANGE && neighbor->state != NeighborState::S_LOADING && neighbor->state != NeighborState::S_FULL) {
@@ -587,16 +577,18 @@ void* recv_ospf_packet_thread(void *inter) {
 				continue;
 			}
 
-			OSPFLsr* ospf_lsr = (OSPFLsr*)(packet + sizeof(iphdr) + sizeof(OSPFHeader));
-			OSPFLsr* ospf_lsr_end = (OSPFLsr*)(packet + sizeof(iphdr) + ntohs(ospf_header->packet_length));
+			OSPFLsr* ospf_lsr 		= (OSPFLsr*)(packet + sizeof(iphdr) + sizeof(OSPFHeader));
+			OSPFLsr* ospf_lsr_end	= (OSPFLsr*)(packet + sizeof(iphdr) + ntohs(ospf_header->packet_length));
 			LSDB* lsdb = &interface->area->lsdb;
 			bool bad_ls_req = false;
 			char* lsu_data = (char*)malloc(1024);
-			char* lsa = lsu_data;
+			OSPFLsu* lsu = (OSPFLsu*)lsu_data;
+			lsu->num = 0;
+			char* lsa = lsu_data + sizeof(OSPFLsu);
 			// pthread_mutex_lock(&lsdb->lsa_mutex);
 			for (; ospf_lsr != ospf_lsr_end; ++ospf_lsr) {
-				uint32_t ls_type = ntohl(ospf_lsr->ls_type);
-				uint32_t link_state_id = ntohl(ospf_lsr->link_state_id);
+				uint32_t ls_type			= ntohl(ospf_lsr->ls_type);
+				uint32_t link_state_id		= ntohl(ospf_lsr->link_state_id);
 				uint32_t advertising_router = ntohl(ospf_lsr->advertising_router);
 
 				if (ls_type == LSA_ROUTER) {
@@ -606,13 +598,13 @@ void* recv_ospf_packet_thread(void *inter) {
 						bad_ls_req = true;
 						break;
 					}
-					LSARouter* router_lsa_net = (LSARouter*) lsa;
+					LSARouter* router_lsa_net = (LSARouter*)lsa;
 					memcpy((LSAHeader*)router_lsa_net, LSAHeader::ntoh(&router_lsa->header), sizeof(LSAHeader));
-					router_lsa_net->zero0 = router_lsa->zero0;
-					router_lsa_net->b_v = router_lsa->b_v;
-					router_lsa_net->b_e = router_lsa->b_e;
-					router_lsa_net->b_b = router_lsa->b_b;
-					router_lsa_net->zero1 = router_lsa->zero1;
+					router_lsa_net->zero0	= router_lsa->zero0;
+					router_lsa_net->b_v		= router_lsa->b_v;
+					router_lsa_net->b_e		= router_lsa->b_e;
+					router_lsa_net->b_b		= router_lsa->b_b;
+					router_lsa_net->zero1	= router_lsa->zero1;
 					router_lsa_net->links_num = htons(router_lsa->links_num);
 					lsa += sizeof(LSAHeader) + sizeof(uint8_t) * 2 + sizeof(uint16_t);
 					for (auto link : router_lsa->links) {
@@ -639,7 +631,6 @@ void* recv_ospf_packet_thread(void *inter) {
 					lsa += sizeof(LSAHeader);
 					*(uint32_t*)lsa = htonl(lsa_network->network_mask);
 					lsa += sizeof(uint32_t);
-
 					for (auto attach_router : lsa_network->attached_routers) {
 						*(uint32_t*)lsa = htonl(attach_router);
 						lsa += sizeof(uint32_t);
@@ -647,13 +638,12 @@ void* recv_ospf_packet_thread(void *inter) {
 				} else {
 					perror("LSR: lsa type no complement!");
 				}
+				lsu->num = htons(ntohs(lsu->num) + 1);
 			}
 			// pthread_mutex_unlock(&lsdb->lsa_mutex);
-			if (bad_ls_req) {
-				free(lsu_data);
-				continue;
+			if (!bad_ls_req) {
+				send_ospf_packet(neighbor->ip, T_LSU, lsu_data, lsa - lsu_data, interface);
 			}
-			send_ospf_packet(neighbor->ip, T_LSU, lsu_data, lsa - lsu_data, interface);
 			free(lsu_data);
 		} else if (ospf_header->type == T_LSU) {
 			debugf(" LSU packet\n");
@@ -857,6 +847,7 @@ void* recv_ospf_packet_thread(void *inter) {
 				}
 			}
 			delete lsa_header_host;
+			free(lsack_data);
 		} else if (ospf_header->type == T_LSAck) {
 			Neighbor* neighbor = interface->find_neighbor(ntohl(src.s_addr));
 			assert(neighbor != nullptr);
@@ -931,6 +922,9 @@ void *send_lsr_packet_thread(void* neigh) {
 	bool is_first = true;
 	struct timespec ts;
 	while (true) {
+		if (neighbor->state != NeighborState::S_EXCHANGE) {
+			break;
+		}
 		pthread_mutex_lock(&neighbor->lsr_mutex);
 		if (!is_first) {
 			clock_gettime(CLOCK_REALTIME, &ts);
@@ -971,6 +965,9 @@ void* retrans_sender_thread(void* neigh) {
 	char* data = (char*)malloc(1024);
 	LSDB* lsdb = &neighbor->interface->area->lsdb;
 	while (true) {
+		if (neighbor->state == NeighborState::S_DOWN) {
+			break;
+		}
 		sleep(neighbor->interface->rxmt_interval);
 		char* ptr = (char*)data;
 		OSPFLsu* lsu = (OSPFLsu*)ptr;
@@ -1090,9 +1087,11 @@ int flooding_lsa(void* lsa_header_ptr, Interface* interface, bool is_origin, in_
 					send_ospf_packet(inet_addr("224.0.0.6"), T_LSU, buffer, sizeof(OSPFLsu) + lsa_header_host->length, interface);
 				}
 				free(buffer);
+				delete lsa_header_host;
 				return 0;
 			}
 		} 
 	}
+	delete lsa_header_host;
 	return -1;
 }

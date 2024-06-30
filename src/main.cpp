@@ -15,9 +15,9 @@ std::vector<OSPFArea*> areas;
 
 void config_init() {
 	myconfig.nic_name			= "enp0s20f0u1c2";	// 手动设定
-	myconfig.ip				= get_ip_address(myconfig.nic_name);
+	myconfig.ip					= get_ip_address(myconfig.nic_name);
 	myconfig.ip_interface_mask	= get_network_mask(myconfig.nic_name);
-	myconfig.router_id 		= ntohl(inet_addr("8.8.8.8"));	// 手动设定
+	myconfig.router_id 			= ntohl(inet_addr("8.8.8.8"));	// 手动设定
 	myconfig.ls_sequence_cnt = INITIAL_SEQUENCE_NUMBER;
 }
 
@@ -30,26 +30,25 @@ int main() {
 	config_init();
 	ospf_init();
 
-	Interface loopback;
-	loopback.state = InterfaceState::S_LOOPBACK;
-	loopback.ip_interface_address = ntohl(inet_addr("192.168.246.200"));
-	loopback.ip_interface_mask = ntohl(inet_addr("255.255.255.000"));
-	interfaces.push_back(&loopback);
+	Interface* loopback = new Interface;
+	loopback->state = InterfaceState::S_LOOPBACK;
+	loopback->ip_interface_address = ntohl(inet_addr("192.168.246.200"));
+	loopback->ip_interface_mask = ntohl(inet_addr("255.255.255.000"));
+	interfaces.push_back(loopback);
 
-	Interface interface;
-	interfaces.push_back(&interface);
+	Interface* interface = new Interface;
+	interfaces.push_back(interface);
+	interface_init(interface);
 
-	OSPFArea area = OSPFArea(ntohl(inet_addr("0.0.0.0")));
-	areas.push_back(&area);
-	
-	interface_init(&interface);
+	OSPFArea* area = new OSPFArea(ntohl(inet_addr("0.0.0.0")));
+	areas.push_back(area);
 
 	OSPFNetwork network = OSPFNetwork(myconfig.ip, ~myconfig.ip_interface_mask);
-	area.networks.push_back(&network);
+	area->networks.push_back(&network);
 	for (auto inter : interfaces) {
 		if ((inter->ip_interface_address & inter->ip_interface_mask) == (network.ip & (~network.wildcard_mask))) {
-			area.interfaces.push_back(inter);
-			inter->area = &area;
+			area->interfaces.push_back(inter);
+			inter->area = area;
 		}
 	}
 
@@ -62,7 +61,7 @@ int main() {
 		printf("    area id %s\n", ip2string(inter->area->id));
 	}
 
-	interface.event_interface_up();
+	interface->event_interface_up();
 	
     pthread_t ospf_hello_sender;
     pthread_t ospf_reciver;
@@ -70,8 +69,8 @@ int main() {
 	printf("[main]\t\tpthread_create: ospf_hello_sender\n");
 	printf("[main]\t\tpthread_create: ospf_reciver\n");
 
-	pthread_create(&ospf_hello_sender, NULL, send_ospf_hello_packet_thread, &interface);
-	pthread_create(&ospf_reciver, NULL, recv_ospf_packet_thread, &interface);
+	pthread_create(&ospf_hello_sender, NULL, send_ospf_hello_packet_thread, interface);
+	pthread_create(&ospf_reciver, NULL, recv_ospf_packet_thread, interface);
 
     pthread_join(ospf_hello_sender, NULL);
     pthread_join(ospf_reciver, NULL);

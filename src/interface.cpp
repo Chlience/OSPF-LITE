@@ -118,7 +118,6 @@ void Interface::event_neighbor_change() {
             state = InterfaceState::S_DROTHER;
         }
     } else {
-        printf("[Interface] %s event_neighbor_change", ip2string(ip_interface_address));
         printf(" REJCET\n");
     }
 }
